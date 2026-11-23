@@ -1,0 +1,28 @@
+# Python
+.venv/
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+
+# Node & Frontend
+node_modules/
+dist/
+dist-ssr/
+*.local
+
+# Testing & Cache
+.pytest_cache/
+coverage/
+
+# Server process state
+.server_pids
+
+# SQLite Database files (keep directory via .gitkeep)
+data/*.db
+data/*.db-journal
+
+# OS files
+.DS_Store
+Thumbs.db
+desktop.ini
