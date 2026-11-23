@@ -4,17 +4,17 @@ Write-Host "====================================" -ForegroundColor Cyan
 Write-Host "          SKIPSENSE SERVER          " -ForegroundColor Green
 Write-Host "====================================" -ForegroundColor Cyan
 
-# 1. Check Python
+# 1. Ensure Python and Node are in PATH
+if (Test-Path "C:\Users\azfrh\AppData\Local\Programs\Python\Python313\python.exe") {
+    $env:Path = "C:\Users\azfrh\AppData\Local\Programs\Python\Python313;C:\Users\azfrh\AppData\Local\Programs\Python\Python313\Scripts;" + $env:Path
+}
+$env:Path = [System.Environment]::GetEnvironmentVariable("Path","Machine") + ";" + [System.Environment]::GetEnvironmentVariable("Path","User") + ";" + $env:Path
+
 $pythonCmd = Get-Command python -ErrorAction SilentlyContinue
 if (-not $pythonCmd) {
-    # Check default install path
-    if (Test-Path "C:\Users\azfrh\AppData\Local\Programs\Python\Python313\python.exe") {
-        $env:Path = "C:\Users\azfrh\AppData\Local\Programs\Python\Python313;C:\Users\azfrh\AppData\Local\Programs\Python\Python313\Scripts;" + $env:Path
-    } else {
-        Write-Host "ERROR: Python is not installed or not in PATH." -ForegroundColor Red
-        Pause
-        Exit 1
-    }
+    Write-Host "ERROR: Python is not installed or not in PATH." -ForegroundColor Red
+    Pause
+    Exit 1
 }
 
 # 2. Check Node & npm
