@@ -233,3 +233,4 @@ export const HistoryPage: React.FC<HistoryPageProps> = ({ onBack }) => {
     </div>
   );
 };
+

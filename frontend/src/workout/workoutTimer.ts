@@ -88,3 +88,4 @@ export class WorkoutTimer {
     return this.maxObservedPace;
   }
 }
+

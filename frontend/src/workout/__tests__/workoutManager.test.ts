@@ -151,3 +151,4 @@ describe('WorkoutManager Lifecycle and Auto-Pause/Resume', () => {
     expect(onWorkoutComplete).toHaveBeenCalledWith(session);
   });
 });
+

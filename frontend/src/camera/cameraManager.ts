@@ -106,3 +106,4 @@ export class CameraManager {
     return new Error(err?.message || 'Failed to initialize camera. Ensure you are on HTTPS.');
   }
 }
+

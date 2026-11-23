@@ -30,3 +30,4 @@ try {
 } catch {}
 
 Write-Host "SkipSense servers stopped successfully." -ForegroundColor Green
+

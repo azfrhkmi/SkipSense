@@ -19,3 +19,4 @@ export interface LifetimeStats {
   best_record_jumps: number;
   best_record_pace: number;
 }
+

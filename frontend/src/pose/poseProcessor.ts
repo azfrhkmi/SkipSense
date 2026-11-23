@@ -143,3 +143,4 @@ export class PoseProcessor {
     this.stabilityCounter = 0;
   }
 }
+

@@ -118,3 +118,4 @@ export const DebugPanel: React.FC<DebugPanelProps> = ({ debugInfo, onClose }) =>
     </div>
   );
 };
+

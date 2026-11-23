@@ -350,3 +350,4 @@ export const HomePage: React.FC<HomePageProps> = ({ onStartWorkout, onViewHistor
     </div>
   );
 };
+

@@ -277,3 +277,4 @@ SkipSense/
 ## 📄 License
 
 MIT License. Designed and developed for fitness enthusiasts and developers.
+
