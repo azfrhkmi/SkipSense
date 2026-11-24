@@ -16,6 +16,11 @@ class WorkoutSession(Base):
     total_duration_seconds = Column(Float, nullable=False, default=0.0)
     average_jumps_per_minute = Column(Float, nullable=False, default=0.0)
     max_jumps_per_minute = Column(Float, nullable=False, default=0.0)
+    exercise_type = Column(String(20), nullable=False, default="skipping", index=True)
+    workout_mode = Column(String(20), nullable=False, default="standard")
+    target_reps = Column(Integer, nullable=True)
+    completed_reps = Column(Integer, nullable=False, default=0)
+    completion_status = Column(String(20), nullable=False, default="completed")
     created_at = Column(
         String(30),
         nullable=False,

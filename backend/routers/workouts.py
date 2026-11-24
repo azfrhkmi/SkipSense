@@ -1,5 +1,5 @@
 from datetime import datetime, timezone
-from typing import List
+from typing import List, Optional
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
 from sqlalchemy import desc
@@ -16,16 +16,24 @@ def create_workout(workout_in: WorkoutCreate, db: Session = Depends(get_db)):
     created_at = datetime.now(timezone.utc).isoformat()
     session_date = workout_in.session_date or datetime.now(timezone.utc).strftime("%Y-%m-%d")
     
+    completed_reps = workout_in.completed_reps or (workout_in.total_jumps if workout_in.exercise_type == "skipping" else 0)
+    total_jumps = workout_in.total_jumps or (completed_reps if workout_in.exercise_type == "push_up" else 0)
+
     db_workout = WorkoutSession(
         session_date=session_date,
         start_time=workout_in.start_time,
         end_time=workout_in.end_time,
-        total_jumps=workout_in.total_jumps,
+        total_jumps=total_jumps,
         active_duration_seconds=workout_in.active_duration_seconds,
         rest_duration_seconds=workout_in.rest_duration_seconds,
         total_duration_seconds=workout_in.total_duration_seconds,
         average_jumps_per_minute=workout_in.average_jumps_per_minute,
         max_jumps_per_minute=workout_in.max_jumps_per_minute,
+        exercise_type=workout_in.exercise_type or "skipping",
+        workout_mode=workout_in.workout_mode or "standard",
+        target_reps=workout_in.target_reps,
+        completed_reps=completed_reps,
+        completion_status=workout_in.completion_status or "completed",
         created_at=created_at,
     )
     db.add(db_workout)
@@ -35,9 +43,17 @@ def create_workout(workout_in: WorkoutCreate, db: Session = Depends(get_db)):
 
 
 @router.get("", response_model=List[WorkoutResponse])
-def get_workouts(skip: int = 0, limit: int = 100, db: Session = Depends(get_db)):
+def get_workouts(
+    exercise_type: Optional[str] = None,
+    skip: int = 0,
+    limit: int = 100,
+    db: Session = Depends(get_db)
+):
+    query = db.query(WorkoutSession)
+    if exercise_type:
+        query = query.filter(WorkoutSession.exercise_type == exercise_type)
     workouts = (
-        db.query(WorkoutSession)
+        query
         .order_by(desc(WorkoutSession.id))
         .offset(skip)
         .limit(limit)

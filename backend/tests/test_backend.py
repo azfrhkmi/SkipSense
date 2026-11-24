@@ -144,6 +144,68 @@ def test_not_found_errors(client):
     assert client.delete("/api/workouts/99999").status_code == 404
 
 
+def test_pushup_workout_creation_and_stats(client):
+    # Pushup workout payload
+    pushup_payload = {
+        "start_time": "2026-11-23T14:00:00Z",
+        "end_time": "2026-11-23T14:05:00Z",
+        "exercise_type": "push_up",
+        "workout_mode": "20",
+        "target_reps": 20,
+        "completed_reps": 20,
+        "completion_status": "completed",
+        "active_duration_seconds": 120.0,
+        "rest_duration_seconds": 0.0,
+        "total_duration_seconds": 120.0,
+        "average_jumps_per_minute": 10.0,
+        "max_jumps_per_minute": 15.0
+    }
+    create_res = client.post("/api/workouts", json=pushup_payload)
+    assert create_res.status_code == 201
+    data = create_res.json()
+    assert data["exercise_type"] == "push_up"
+    assert data["workout_mode"] == "20"
+    assert data["target_reps"] == 20
+    assert data["completed_reps"] == 20
+    assert data["completion_status"] == "completed"
+
+    # Also create a skipping workout
+    skipping_payload = {
+        "start_time": "2026-11-23T15:00:00Z",
+        "end_time": "2026-11-23T15:05:00Z",
+        "exercise_type": "skipping",
+        "total_jumps": 100,
+        "active_duration_seconds": 180.0,
+        "rest_duration_seconds": 20.0,
+        "total_duration_seconds": 200.0,
+        "average_jumps_per_minute": 33.3,
+        "max_jumps_per_minute": 50.0
+    }
+    client.post("/api/workouts", json=skipping_payload)
+
+    # Filter workouts by exercise_type=push_up
+    pushup_list = client.get("/api/workouts?exercise_type=push_up").json()
+    assert len(pushup_list) == 1
+    assert pushup_list[0]["exercise_type"] == "push_up"
+
+    # Filter workouts by exercise_type=skipping
+    skipping_list = client.get("/api/workouts?exercise_type=skipping").json()
+    assert len(skipping_list) == 1
+    assert skipping_list[0]["exercise_type"] == "skipping"
+
+    # All workouts
+    all_list = client.get("/api/workouts").json()
+    assert len(all_list) == 2
+
+    # Check dual stats
+    stats = client.get("/api/stats").json()
+    assert stats["total_sessions"] == 2
+    assert stats["total_lifetime_jumps"] == 100
+    assert stats["total_lifetime_pushups"] == 20
+    assert stats["total_pushup_sessions"] == 1
+    assert stats["best_record_pushups"] == 20
+
+
 def test_validation_errors(client):
     # Invalid: negative jumps
     invalid_payload = {

@@ -16,17 +16,23 @@ export class WorkoutService {
     }
   }
 
-  public static async getWorkouts(): Promise<WorkoutSessionData[]> {
+  public static async getWorkouts(exerciseType?: string): Promise<WorkoutSessionData[]> {
     try {
-      const res = await fetch(`${this.baseUrl}/workouts`);
+      const url = exerciseType
+        ? `${this.baseUrl}/workouts?exercise_type=${encodeURIComponent(exerciseType)}`
+        : `${this.baseUrl}/workouts`;
+      const res = await fetch(url);
       if (!res.ok) throw new Error(`HTTP error ${res.status}`);
       const workouts: WorkoutSessionData[] = await res.json();
-      // Cache locally
-      localStorage.setItem(LOCAL_STORAGE_KEY, JSON.stringify(workouts));
+      // If fetching all, cache locally
+      if (!exerciseType) {
+        localStorage.setItem(LOCAL_STORAGE_KEY, JSON.stringify(workouts));
+      }
       return workouts;
     } catch (e) {
       console.warn('Backend unavailable, loading cached workouts from local storage:', e);
-      return this.getLocalWorkouts();
+      const cached = this.getLocalWorkouts();
+      return exerciseType ? cached.filter((w) => w.exercise_type === exerciseType) : cached;
     }
   }
 
