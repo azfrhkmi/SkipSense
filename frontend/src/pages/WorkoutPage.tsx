@@ -14,6 +14,7 @@ import {
   Pause,
   Play,
   Activity,
+  SwitchCamera,
 } from 'lucide-react';
 
 interface WorkoutPageProps {
@@ -39,6 +40,8 @@ export const WorkoutPage: React.FC<WorkoutPageProps> = ({ onFinishWorkout, onExi
   const [countdown, setCountdown] = useState<number | null>(null);
   const [positionFeedback, setPositionFeedback] = useState<string>('Initializing AI & Camera...');
   const [cameraError, setCameraError] = useState<string | null>(null);
+  const [facingMode, setFacingMode] = useState<'user' | 'environment'>('user');
+  const [isSwitchingCamera, setIsSwitchingCamera] = useState(false);
   const [showDebug, setShowDebug] = useState(false);
   const [debugInfo, setDebugInfo] = useState<JumpDebugInfo>({
     state: 'GROUNDED',
@@ -198,6 +201,24 @@ export const WorkoutPage: React.FC<WorkoutPageProps> = ({ onFinishWorkout, onExi
     }
   };
 
+  const handleSwitchCamera = async () => {
+    if (isSwitchingCamera || !cameraManagerRef.current || !videoRef.current || !canvasRef.current) return;
+    setIsSwitchingCamera(true);
+    try {
+      const newMode = await cameraManagerRef.current.switchCamera();
+      setFacingMode(newMode);
+      if (videoRef.current && canvasRef.current) {
+        canvasRef.current.width = videoRef.current.videoWidth || 1280;
+        canvasRef.current.height = videoRef.current.videoHeight || 720;
+      }
+    } catch (err: any) {
+      console.error('Failed to switch camera:', err);
+      alert(err?.message || 'Failed to switch camera.');
+    } finally {
+      setIsSwitchingCamera(false);
+    }
+  };
+
   // Border and status indicator styling
   const getBorderColor = () => {
     switch (status) {
@@ -283,8 +304,30 @@ export const WorkoutPage: React.FC<WorkoutPageProps> = ({ onFinishWorkout, onExi
           <span>{badge.text}</span>
         </div>
 
-        {/* Right Action Icons: Debug & Abort */}
+        {/* Right Action Icons: Camera Switch, Debug & Abort */}
         <div style={{ display: 'flex', gap: 10 }}>
+          <button
+            onClick={handleSwitchCamera}
+            disabled={isSwitchingCamera}
+            title={facingMode === 'user' ? 'Switch to Back Camera' : 'Switch to Front Camera'}
+            style={{
+              height: 38,
+              padding: '0 12px',
+              borderRadius: 20,
+              backgroundColor: 'rgba(27, 32, 36, 0.85)',
+              border: '1px solid var(--border-subtle)',
+              color: 'var(--text-primary)',
+              display: 'flex',
+              alignItems: 'center',
+              gap: 6,
+              fontSize: 12,
+              fontWeight: 600,
+            }}
+          >
+            <SwitchCamera size={18} className={isSwitchingCamera ? 'animate-spin' : ''} />
+            <span>{facingMode === 'user' ? 'Front' : 'Back'}</span>
+          </button>
+
           <button
             onClick={() => setShowDebug(!showDebug)}
             style={{
@@ -339,7 +382,7 @@ export const WorkoutPage: React.FC<WorkoutPageProps> = ({ onFinishWorkout, onExi
           transition: 'border-color 0.3s ease, box-shadow 0.3s ease',
         }}
       >
-        {/* Mirrored Video element */}
+        {/* Video element (Mirrored only when using front camera) */}
         <video
           ref={videoRef}
           playsInline
@@ -349,11 +392,11 @@ export const WorkoutPage: React.FC<WorkoutPageProps> = ({ onFinishWorkout, onExi
             width: '100%',
             height: '100%',
             objectFit: 'contain',
-            transform: 'scaleX(-1)', // Mirror preview for natural selfie interaction
+            transform: facingMode === 'user' ? 'scaleX(-1)' : 'none',
           }}
         />
 
-        {/* Skeleton Canvas Overlay (Mirrored identically to video) */}
+        {/* Skeleton Canvas Overlay (Mirrored to match video preview) */}
         <canvas
           ref={canvasRef}
           style={{
@@ -364,7 +407,7 @@ export const WorkoutPage: React.FC<WorkoutPageProps> = ({ onFinishWorkout, onExi
             height: '100%',
             objectFit: 'contain',
             pointerEvents: 'none',
-            transform: 'scaleX(-1)', // Match mirrored video
+            transform: facingMode === 'user' ? 'scaleX(-1)' : 'none',
           }}
         />
 

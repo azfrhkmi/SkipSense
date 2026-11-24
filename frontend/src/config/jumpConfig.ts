@@ -60,3 +60,4 @@ export const DEFAULT_JUMP_CONFIG: JumpConfig = {
   ankleWeight: 0.45,
   trackingLostGraceFrames: 4,
 };
+

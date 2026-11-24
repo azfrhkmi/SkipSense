@@ -89,13 +89,26 @@ export class CameraManager {
     return this.stream !== null && this.stream.active;
   }
 
+  public get currentFacingMode(): 'user' | 'environment' {
+    return this.config.facingMode;
+  }
+
+  public async switchCamera(targetMode?: 'user' | 'environment'): Promise<'user' | 'environment'> {
+    const newMode = targetMode || (this.config.facingMode === 'user' ? 'environment' : 'user');
+    this.config.facingMode = newMode;
+    if (this.videoElement) {
+      await this.startCamera(this.videoElement);
+    }
+    return newMode;
+  }
+
   private formatCameraError(err: any): Error {
     const errorName = err?.name || '';
     if (errorName === 'NotAllowedError' || errorName === 'PermissionDeniedError') {
       return new Error('Camera access was denied. Please allow camera permissions in Safari / browser settings and reload.');
     }
     if (errorName === 'NotFoundError' || errorName === 'DevicesNotFoundError') {
-      return new Error('No front-facing camera was found on this device.');
+      return new Error(`No ${this.config.facingMode === 'user' ? 'front-facing' : 'rear/back'} camera was found on this device.`);
     }
     if (errorName === 'NotReadableError' || errorName === 'TrackStartError') {
       return new Error('Camera is already in use by another application or tab.');
