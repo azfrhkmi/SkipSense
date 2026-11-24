@@ -3,6 +3,7 @@ import { WorkoutSessionData } from '../types/workout';
 import { JumpDetector } from '../counter/jumpDetector';
 import { PoseProcessor } from '../pose/poseProcessor';
 import { WorkoutTimer } from './workoutTimer';
+import { DEFAULT_JUMP_CONFIG } from '../config/jumpConfig';
 
 export interface WorkoutCallbacks {
   onStatusChange: (status: WorkoutStatus) => void;
@@ -28,6 +29,9 @@ export class WorkoutManager {
   // Auto-pause duration: exactly 5 seconds of inactivity
   private readonly AUTO_PAUSE_MS = 5000;
   private lastJumpOrActivityTime = 0;
+
+  // Consecutive tracking loss debouncer to avoid single-frame motion blur dropouts
+  private trackingLostFrames = 0;
 
   constructor(callbacks: WorkoutCallbacks) {
     this.callbacks = callbacks;
@@ -61,6 +65,7 @@ export class WorkoutManager {
     this.callbacks.onCountChange(0);
     this.countdownSeconds = 3;
     this.lastJumpOrActivityTime = 0;
+    this.trackingLostFrames = 0;
   }
 
   /**
@@ -78,7 +83,6 @@ export class WorkoutManager {
     switch (this.status) {
       case 'CALIBRATING': {
         if (!positionStatus.isFullyVisible || !positionStatus.isCentered || !positionStatus.isFacingCamera) {
-          // Can't calibrate if not properly positioned
           return;
         }
 
@@ -98,13 +102,22 @@ export class WorkoutManager {
       }
 
       case 'ACTIVE': {
-        // Check for tracking loss vs normal activity
+        if (this.lastJumpOrActivityTime === 0) {
+          this.lastJumpOrActivityTime = timestampMs;
+        }
+
+        // Debounce tracking loss against single-frame motion blur of spinning rope/feet
         if (!positionStatus.isFullyVisible || landmarks.length === 0) {
-          this.status = 'TRACKING_LOST';
-          this.callbacks.onStatusChange(this.status);
-          this.callbacks.onPositionFeedback('TRACKING LOST – Step back into frame');
+          this.trackingLostFrames++;
+          if (this.trackingLostFrames >= DEFAULT_JUMP_CONFIG.trackingLostGraceFrames) {
+            this.status = 'TRACKING_LOST';
+            this.callbacks.onStatusChange(this.status);
+            this.callbacks.onPositionFeedback('TRACKING LOST – Step back into frame');
+          }
           return;
         }
+
+        this.trackingLostFrames = 0;
 
         // Process jump
         const jumpCounted = this.jumpDetector.processFrame(landmarks, timestampMs);
@@ -160,8 +173,9 @@ export class WorkoutManager {
         // Paused while tracking is lost
         this.timer.update(false, false, timestampMs);
 
-        // If tracking returns and user is stable, resume previous state
+        // If tracking returns and user is stable, resume previous active state
         if (positionStatus.isFullyVisible && positionStatus.isCentered) {
+          this.trackingLostFrames = 0;
           this.status = 'ACTIVE';
           this.lastJumpOrActivityTime = timestampMs;
           this.callbacks.onStatusChange(this.status);
@@ -210,7 +224,8 @@ export class WorkoutManager {
   private activateWorkout() {
     this.status = 'ACTIVE';
     this.startTime = new Date().toISOString();
-    this.lastJumpOrActivityTime = performance.now();
+    this.lastJumpOrActivityTime = 0;
+    this.trackingLostFrames = 0;
     this.callbacks.onStatusChange(this.status);
     this.callbacks.onCountChange(0);
   }
@@ -256,6 +271,7 @@ export class WorkoutManager {
       this.countdownTimerId = null;
     }
     this.status = 'IDLE';
+    this.trackingLostFrames = 0;
     this.jumpDetector.resetAll();
     this.poseProcessor.reset();
     this.timer.reset();

@@ -21,18 +21,37 @@ export type WorkoutStatus =
   | 'TRACKING_LOST'
   | 'FINISHED';
 
+export interface StateTransitionEvent {
+  from: JumpState;
+  to: JumpState;
+  timestamp: number;
+  displacement: number;
+  velocity: number;
+  confidence: number;
+}
+
 export interface JumpDebugInfo {
   state: JumpState;
+  totalJumps: number;
   hipY: number;
   ankleY: number;
   baselineHipY: number;
+  dynamicBaselineY: number;
   displacementNorm: number;
   velocity: number;
+  hipVelocity: number;
+  ankleVelocity: number;
   landmarkConfidence: number;
   isAirborne: boolean;
+  airborneDurationMs: number;
   lastJumpTime: number;
+  timeSinceLastJumpMs: number;
   threshold: number;
   fps: number;
+  inferenceFps: number;
+  lastRejectionReason: string;
+  movementDirection: 'UP' | 'DOWN' | 'STABLE';
+  recentTransitions: StateTransitionEvent[];
 }
 
 export interface BodyPositionStatus {

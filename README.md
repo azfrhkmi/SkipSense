@@ -1,6 +1,14 @@
-# SkipSense v1.0 – AI-Powered Skipping Counter
+# SkipSense v1.1 – AI-Powered Skipping Counter
 
 SkipSense is a local-first, privacy-focused, AI-powered skipping counter web application. It uses real-time human pose estimation running entirely inside your mobile browser to track full-body skeletal movement, count completed jumps on confirmed landings, automatically manage workout state, and persist workout sessions to a local SQLite database.
+
+### 🚀 What's New in v1.1 (Jump Accuracy & Sensitivity Optimization)
+- **Dynamic Grounded Baseline**: Adapts automatically as the user skips on the balls of their feet, preventing the static baseline trap that previously caused missed landing detections.
+- **Tuned for Real Skipping Cycles**: Lowered takeoff (`0.045`) and airborne (`0.080`) thresholds to reliably detect small rapid skipping jumps (2-5cm) at 120-180+ RPM.
+- **Low-Latency Movement Smoother**: Increased EMA alpha to `0.65` and upgraded velocity derivative to eliminate phase lag and peak attenuation.
+- **Comprehensive Real-Time Debug Panel**: Developer overlay displaying live FPS, inference rates, dynamic baseline, velocities, airborne duration, movement direction (UP/DOWN/STABLE), and historical state transitions with rejection reasons.
+- **Debounced Tracking Loss**: 4-frame grace window protects against momentary motion blur dropouts during fast rope revolutions.
+- **Centralized Jump Configuration**: All parameters exposed in `frontend/src/config/jumpConfig.ts`.
 
 ---
 

@@ -1,5 +1,8 @@
+import { DEFAULT_JUMP_CONFIG } from '../config/jumpConfig';
+
 /**
  * Exponential Moving Average (EMA) and velocity estimation for temporal pose smoothing.
+ * Tuned for rapid skipping jumps with low phase delay.
  */
 export class MovementSmoother {
   private alpha: number;
@@ -9,9 +12,13 @@ export class MovementSmoother {
   private estimatedVelocity = 0;
 
   /**
-   * @param alpha Smoothing factor between 0 (heavy smoothing / high inertia) and 1 (no smoothing).
+   * @param alpha Smoothing factor between 0.01 (heavy smoothing / high inertia) and 1.0 (no smoothing).
    */
-  constructor(alpha = 0.4) {
+  constructor(alpha: number = DEFAULT_JUMP_CONFIG.emaAlpha) {
+    this.alpha = Math.max(0.01, Math.min(1.0, alpha));
+  }
+
+  public setAlpha(alpha: number) {
     this.alpha = Math.max(0.01, Math.min(1.0, alpha));
   }
 
@@ -24,7 +31,8 @@ export class MovementSmoother {
       return { smoothed: val, velocity: 0 };
     }
 
-    const dtSeconds = Math.max(0.001, (timestampMs - this.prevTimestamp) / 1000.0);
+    // Protect against non-monotonic or zero dt
+    const dtSeconds = Math.max(0.005, (timestampMs - this.prevTimestamp) / 1000.0);
 
     // EMA update
     this.prevSmoothedValue = this.smoothedValue;
@@ -33,8 +41,8 @@ export class MovementSmoother {
     // Numerical derivative for velocity (units/second)
     const rawVelocity = (this.smoothedValue - this.prevSmoothedValue) / dtSeconds;
 
-    // Dampen velocity noise with a secondary EMA filter
-    this.estimatedVelocity = 0.5 * rawVelocity + 0.5 * this.estimatedVelocity;
+    // Low-latency velocity filter (0.7 / 0.3) to catch rapid transitions promptly
+    this.estimatedVelocity = 0.7 * rawVelocity + 0.3 * this.estimatedVelocity;
     this.prevTimestamp = timestampMs;
 
     return {
@@ -58,4 +66,3 @@ export class MovementSmoother {
     return this.estimatedVelocity;
   }
 }
-

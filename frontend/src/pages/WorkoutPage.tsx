@@ -42,16 +42,26 @@ export const WorkoutPage: React.FC<WorkoutPageProps> = ({ onFinishWorkout, onExi
   const [showDebug, setShowDebug] = useState(false);
   const [debugInfo, setDebugInfo] = useState<JumpDebugInfo>({
     state: 'GROUNDED',
+    totalJumps: 0,
     hipY: 0,
     ankleY: 0,
     baselineHipY: 0,
+    dynamicBaselineY: 0,
     displacementNorm: 0,
     velocity: 0,
+    hipVelocity: 0,
+    ankleVelocity: 0,
     landmarkConfidence: 0,
     isAirborne: false,
+    airborneDurationMs: 0,
     lastJumpTime: 0,
-    threshold: 0.16,
+    timeSinceLastJumpMs: 0,
+    threshold: 0.08,
     fps: 0,
+    inferenceFps: 0,
+    lastRejectionReason: 'None',
+    movementDirection: 'STABLE',
+    recentTransitions: [],
   });
 
   const formatTimer = (seconds: number) => {
@@ -109,21 +119,23 @@ export const WorkoutPage: React.FC<WorkoutPageProps> = ({ onFinishWorkout, onExi
 
       // 4. Start Real-time Detection Loop
       let lastInferenceTime = 0;
+      let isInferring = false;
       const processLoop = () => {
         if (!isRunningRef.current) return;
 
         const now = performance.now();
-        // Target 25-30 inferences/sec (every ~33-40ms) to ensure smooth iPhone performance
-        if (now - lastInferenceTime >= 33 && video.readyState >= 2) {
+        // Responsive inference cadence (up to 40-50 inferences/sec when hardware permits, min 20ms)
+        if (!isInferring && now - lastInferenceTime >= 20 && video.readyState >= 2) {
+          isInferring = true;
           lastInferenceTime = now;
           const result = poseService.detectForVideo(video, now);
+          isInferring = false;
 
           if (result && result.landmarks && result.landmarks.length > 0) {
             const landmarks = result.landmarks[0];
 
             // Render skeleton matching mirrored view
             if (skeletonRendererRef.current) {
-              // Video has CSS scaleX(-1). If we draw canvas matching mirrored video:
               skeletonRendererRef.current.render(landmarks, {
                 status: workoutManagerRef.current?.currentStatus || 'IDLE',
                 mirrored: false,

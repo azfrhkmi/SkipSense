@@ -1,4 +1,5 @@
 import { NormalizedLandmark, POSE_LANDMARKS, BodyPositionStatus } from '../types/pose';
+import { DEFAULT_JUMP_CONFIG } from '../config/jumpConfig';
 
 export class PoseProcessor {
   private prevHipY: number | null = null;
@@ -42,26 +43,34 @@ export class PoseProcessor {
     ];
 
     let totalVis = 0;
+    const minVis = DEFAULT_JUMP_CONFIG.minLandmarkVisibility; // e.g. 0.35
+    let lowConfidenceCount = 0;
+
     for (const lm of requiredLandmarks) {
       const v = lm.visibility ?? 1.0;
       totalVis += v;
-      if (v < 0.4) {
-        return {
-          isFullyVisible: false,
-          isCentered: false,
-          isFacingCamera: false,
-          isStable: false,
-          message: 'Body not fully detected. Ensure good lighting.',
-          confidence: totalVis / requiredLandmarks.length,
-        };
+      if (v < minVis) {
+        lowConfidenceCount++;
       }
     }
     const confidence = totalVis / requiredLandmarks.length;
 
-    // 2. Check Frame Boundaries (User should be fully inside frame)
-    // Ankles/feet at bottom: if y > 0.96, feet are clipped
+    // Allow up to 1 landmark to have brief motion blur if overall confidence is reasonable
+    if (lowConfidenceCount > 1 || confidence < 0.45) {
+      return {
+        isFullyVisible: false,
+        isCentered: false,
+        isFacingCamera: false,
+        isStable: false,
+        message: 'Body not fully detected. Ensure good lighting.',
+        confidence,
+      };
+    }
+
+    // 2. Check Frame Boundaries (User should be mostly inside frame)
+    // Ankles/feet at bottom: if y > 0.98, feet are severely clipped
     const maxAnkleY = Math.max(leftAnkle.y, rightAnkle.y);
-    if (maxAnkleY > 0.96) {
+    if (maxAnkleY > 0.98) {
       return {
         isFullyVisible: false,
         isCentered: false,
@@ -72,8 +81,8 @@ export class PoseProcessor {
       };
     }
 
-    // Head / nose at top: if nose y < 0.04, head is clipped
-    if (nose && nose.y < 0.04) {
+    // Head / nose at top: if nose y < 0.02, head is clipped
+    if (nose && nose.y < 0.02) {
       return {
         isFullyVisible: false,
         isCentered: false,
@@ -84,9 +93,9 @@ export class PoseProcessor {
       };
     }
 
-    // 3. Check Centering (hip center between 0.20 and 0.80)
+    // 3. Check Centering (hip center between 0.15 and 0.85)
     const hipCenterX = (leftHip.x + rightHip.x) / 2.0;
-    const isCentered = hipCenterX >= 0.20 && hipCenterX <= 0.80;
+    const isCentered = hipCenterX >= 0.15 && hipCenterX <= 0.85;
     if (!isCentered) {
       return {
         isFullyVisible: true,
@@ -101,7 +110,7 @@ export class PoseProcessor {
     // 4. Check Facing Camera (Shoulder width should be prominent and symmetric)
     const shoulderSpan = Math.abs(leftShoulder.x - rightShoulder.x);
     const hipSpan = Math.abs(leftHip.x - rightHip.x);
-    const isFacingCamera = shoulderSpan > 0.08 && hipSpan > 0.06;
+    const isFacingCamera = shoulderSpan > 0.07 && hipSpan > 0.05;
     if (!isFacingCamera) {
       return {
         isFullyVisible: true,
@@ -143,4 +152,3 @@ export class PoseProcessor {
     this.stabilityCounter = 0;
   }
 }
-

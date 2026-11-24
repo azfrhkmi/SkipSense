@@ -1,53 +1,77 @@
 import { NormalizedLandmark, POSE_LANDMARKS, JumpDebugInfo } from '../types/pose';
 import { MovementSmoother } from './movementSmoother';
-import { JumpStateMachine, StateMachineConfig } from './stateMachine';
+import { JumpStateMachine } from './stateMachine';
+import { JumpConfig, DEFAULT_JUMP_CONFIG } from '../config/jumpConfig';
 
 export interface JumpDetectorOptions {
-  minLandmarkConfidence?: number;
-  stateMachineConfig?: Partial<StateMachineConfig>;
+  config?: Partial<JumpConfig>;
 }
 
 export class JumpDetector {
+  private config: JumpConfig;
   private stateMachine: JumpStateMachine;
   private hipSmoother: MovementSmoother;
-  private ankleSmoother: MovementSmoother;
+  private lowerSmoother: MovementSmoother;
 
-  private minConfidence: number;
+  // Static calibration references
   private baselineHipY: number | null = null;
-  private baselineAnkleY: number | null = null;
+  private _baselineLowerY: number | null = null;
   private baselineTorsoLength: number | null = null;
-  private calibrationSamples: { hipY: number; ankleY: number; torso: number }[] = [];
+  private calibrationSamples: { hipY: number; lowerY: number; torso: number }[] = [];
   private isCalibrated = false;
+
+  // Dynamic ground baseline that adapts to jumping on balls of feet / stance shifts
+  private dynamicHipY: number | null = null;
+  private dynamicLowerY: number | null = null;
+  private dynamicLeftFootY: number | null = null;
+  private dynamicRightFootY: number | null = null;
 
   private jumpCount = 0;
   private lastDebugInfo: JumpDebugInfo;
   private frameCount = 0;
   private lastFpsTimestamp = 0;
   private currentFps = 0;
+  private inferenceCount = 0;
+  private lastInferenceTimestamp = 0;
+  private currentInferenceFps = 0;
 
   constructor(options: JumpDetectorOptions = {}) {
-    this.minConfidence = options.minLandmarkConfidence ?? 0.5;
-    this.stateMachine = new JumpStateMachine(options.stateMachineConfig);
-    this.hipSmoother = new MovementSmoother(0.4);
-    this.ankleSmoother = new MovementSmoother(0.4);
+    this.config = { ...DEFAULT_JUMP_CONFIG, ...options.config };
+    this.stateMachine = new JumpStateMachine(this.config);
+    this.hipSmoother = new MovementSmoother(this.config.emaAlpha);
+    this.lowerSmoother = new MovementSmoother(this.config.emaAlpha);
 
     this.lastDebugInfo = {
       state: 'GROUNDED',
+      totalJumps: 0,
       hipY: 0,
       ankleY: 0,
       baselineHipY: 0,
+      dynamicBaselineY: 0,
       displacementNorm: 0,
       velocity: 0,
+      hipVelocity: 0,
+      ankleVelocity: 0,
       landmarkConfidence: 0,
       isAirborne: false,
+      airborneDurationMs: 0,
       lastJumpTime: 0,
-      threshold: 0.16,
+      timeSinceLastJumpMs: 0,
+      threshold: this.config.airborneThresholdNorm,
       fps: 0,
+      inferenceFps: 0,
+      lastRejectionReason: 'None',
+      movementDirection: 'STABLE',
+      recentTransitions: [],
     };
   }
 
   public get totalJumps(): number {
     return this.jumpCount;
+  }
+
+  public get initialBaselineLowerY(): number {
+    return this._baselineLowerY ?? 0;
   }
 
   public get calibrated(): boolean {
@@ -56,6 +80,17 @@ export class JumpDetector {
 
   public get debugInfo(): JumpDebugInfo {
     return this.lastDebugInfo;
+  }
+
+  public get currentConfig(): JumpConfig {
+    return this.config;
+  }
+
+  public updateConfig(newConfig: Partial<JumpConfig>) {
+    this.config = { ...this.config, ...newConfig };
+    this.stateMachine.updateConfig(this.config);
+    this.hipSmoother.setAlpha(this.config.emaAlpha);
+    this.lowerSmoother.setAlpha(this.config.emaAlpha);
   }
 
   /**
@@ -73,12 +108,16 @@ export class JumpDetector {
     this.jumpCount = 0;
     this.isCalibrated = false;
     this.baselineHipY = null;
-    this.baselineAnkleY = null;
+    this._baselineLowerY = null;
     this.baselineTorsoLength = null;
+    this.dynamicHipY = null;
+    this.dynamicLowerY = null;
+    this.dynamicLeftFootY = null;
+    this.dynamicRightFootY = null;
     this.calibrationSamples = [];
     this.stateMachine.reset();
     this.hipSmoother.reset();
-    this.ankleSmoother.reset();
+    this.lowerSmoother.reset();
   }
 
   /**
@@ -86,89 +125,8 @@ export class JumpDetector {
    */
   public addCalibrationFrame(landmarks: NormalizedLandmark[]): boolean {
     const confidence = this.getLowerBodyConfidence(landmarks);
-    if (confidence < this.minConfidence) return false;
+    if (confidence < this.config.minLandmarkVisibility) return false;
 
-    const hipMid = this.getMidpoint(
-      landmarks[POSE_LANDMARKS.LEFT_HIP],
-      landmarks[POSE_LANDMARKS.RIGHT_HIP]
-    );
-    const ankleMid = this.getMidpoint(
-      landmarks[POSE_LANDMARKS.LEFT_ANKLE],
-      landmarks[POSE_LANDMARKS.RIGHT_ANKLE]
-    );
-    const shoulderMid = this.getMidpoint(
-      landmarks[POSE_LANDMARKS.LEFT_SHOULDER],
-      landmarks[POSE_LANDMARKS.RIGHT_SHOULDER]
-    );
-
-    const torsoLength = Math.hypot(hipMid.x - shoulderMid.x, hipMid.y - shoulderMid.y);
-    if (torsoLength < 0.05) return false;
-
-    this.calibrationSamples.push({
-      hipY: hipMid.y,
-      ankleY: ankleMid.y,
-      torso: torsoLength,
-    });
-
-    // Need 15 stable frames to lock in baseline
-    if (this.calibrationSamples.length >= 15) {
-      const avgHip =
-        this.calibrationSamples.reduce((sum, s) => sum + s.hipY, 0) /
-        this.calibrationSamples.length;
-      const avgAnkle =
-        this.calibrationSamples.reduce((sum, s) => sum + s.ankleY, 0) /
-        this.calibrationSamples.length;
-      const avgTorso =
-        this.calibrationSamples.reduce((sum, s) => sum + s.torso, 0) /
-        this.calibrationSamples.length;
-
-      this.baselineHipY = avgHip;
-      this.baselineAnkleY = avgAnkle;
-      this.baselineTorsoLength = avgTorso;
-      this.isCalibrated = true;
-      this.hipSmoother.reset(avgHip);
-      this.ankleSmoother.reset(avgAnkle);
-      return true;
-    }
-
-    return false;
-  }
-
-  /**
-   * Sets baseline manually (useful for tests or predefined calibration)
-   */
-  public setBaseline(baselineHipY: number, baselineAnkleY: number, torsoLength: number) {
-    this.baselineHipY = baselineHipY;
-    this.baselineAnkleY = baselineAnkleY;
-    this.baselineTorsoLength = torsoLength;
-    this.isCalibrated = true;
-    this.hipSmoother.reset(baselineHipY);
-    this.ankleSmoother.reset(baselineAnkleY);
-  }
-
-  /**
-   * Processes a video frame containing detected pose landmarks.
-   * @param landmarks 33 MediaPipe pose landmarks
-   * @param timestampMs Frame timestamp in milliseconds
-   * @returns boolean true if a jump was completed and counted in this frame
-   */
-  public processFrame(landmarks: NormalizedLandmark[], timestampMs: number): boolean {
-    this.updateFps(timestampMs);
-
-    // 1. Verify confidence of essential lower-body landmarks
-    const confidence = this.getLowerBodyConfidence(landmarks);
-    if (confidence < this.minConfidence) {
-      this.updateDebugInfo(0, 0, confidence, timestampMs);
-      return false;
-    }
-
-    // Must be calibrated before jumping
-    if (!this.isCalibrated || this.baselineHipY === null || !this.baselineTorsoLength) {
-      this.updateDebugInfo(0, 0, confidence, timestampMs);
-      return false;
-    }
-
-    // 2. Extract key landmark positions
     const leftHip = landmarks[POSE_LANDMARKS.LEFT_HIP];
     const rightHip = landmarks[POSE_LANDMARKS.RIGHT_HIP];
     const leftAnkle = landmarks[POSE_LANDMARKS.LEFT_ANKLE];
@@ -176,10 +134,105 @@ export class JumpDetector {
     const leftShoulder = landmarks[POSE_LANDMARKS.LEFT_SHOULDER];
     const rightShoulder = landmarks[POSE_LANDMARKS.RIGHT_SHOULDER];
 
-    const rawHipY = (leftHip.y + rightHip.y) / 2.0;
-    const rawAnkleY = (leftAnkle.y + rightAnkle.y) / 2.0;
+    const hipMid = this.getMidpoint(leftHip, rightHip);
+    const ankleMid = this.getMidpoint(leftAnkle, rightAnkle);
+    const shoulderMid = this.getMidpoint(leftShoulder, rightShoulder);
 
-    // Current torso length to normalize scale
+    const torsoLength = Math.hypot(hipMid.x - shoulderMid.x, hipMid.y - shoulderMid.y);
+    if (torsoLength < 0.05) return false;
+
+    this.calibrationSamples.push({
+      hipY: hipMid.y,
+      lowerY: ankleMid.y,
+      torso: torsoLength,
+    });
+
+    // 15 stable frames lock in calibration
+    if (this.calibrationSamples.length >= 15) {
+      const avgHip =
+        this.calibrationSamples.reduce((sum, s) => sum + s.hipY, 0) /
+        this.calibrationSamples.length;
+      const avgLower =
+        this.calibrationSamples.reduce((sum, s) => sum + s.lowerY, 0) /
+        this.calibrationSamples.length;
+      const avgTorso =
+        this.calibrationSamples.reduce((sum, s) => sum + s.torso, 0) /
+        this.calibrationSamples.length;
+
+      this.baselineHipY = avgHip;
+      this._baselineLowerY = avgLower;
+      this.baselineTorsoLength = avgTorso;
+
+      // Initialize dynamic baseline to initial standing height
+      this.dynamicHipY = avgHip;
+      this.dynamicLowerY = avgLower;
+      this.dynamicLeftFootY = leftAnkle.y;
+      this.dynamicRightFootY = rightAnkle.y;
+
+      this.isCalibrated = true;
+      this.hipSmoother.reset(avgHip);
+      this.lowerSmoother.reset(avgLower);
+      return true;
+    }
+
+    return false;
+  }
+
+  /**
+   * Sets baseline manually (for testing or predefined setups)
+   */
+  public setBaseline(baselineHipY: number, baselineLowerY: number, torsoLength: number) {
+    this.baselineHipY = baselineHipY;
+    this._baselineLowerY = baselineLowerY;
+    this.baselineTorsoLength = torsoLength;
+    this.dynamicHipY = baselineHipY;
+    this.dynamicLowerY = baselineLowerY;
+    this.dynamicLeftFootY = baselineLowerY;
+    this.dynamicRightFootY = baselineLowerY;
+    this.isCalibrated = true;
+    this.hipSmoother.reset(baselineHipY);
+    this.lowerSmoother.reset(baselineLowerY);
+  }
+
+  /**
+   * Processes a video frame containing detected pose landmarks.
+   */
+  public processFrame(landmarks: NormalizedLandmark[], timestampMs: number): boolean {
+    this.updateFps(timestampMs);
+    this.updateInferenceFps(timestampMs);
+
+    // 1. Verify confidence of lower-body landmarks
+    const confidence = this.getLowerBodyConfidence(landmarks);
+    if (confidence < this.config.minLandmarkVisibility) {
+      this.updateDebugInfo(0, 0, 0, 0, confidence, timestampMs, 'Rejected: low landmark visibility');
+      return false;
+    }
+
+    if (!this.isCalibrated || this.dynamicHipY === null || this.dynamicLowerY === null || !this.baselineTorsoLength) {
+      this.updateDebugInfo(0, 0, 0, 0, confidence, timestampMs, 'Rejected: not calibrated');
+      return false;
+    }
+
+    // 2. Extract landmark positions
+    const leftHip = landmarks[POSE_LANDMARKS.LEFT_HIP];
+    const rightHip = landmarks[POSE_LANDMARKS.RIGHT_HIP];
+    const leftAnkle = landmarks[POSE_LANDMARKS.LEFT_ANKLE];
+    const rightAnkle = landmarks[POSE_LANDMARKS.RIGHT_ANKLE];
+    const leftHeel = landmarks[POSE_LANDMARKS.LEFT_HEEL] || leftAnkle;
+    const rightHeel = landmarks[POSE_LANDMARKS.RIGHT_HEEL] || rightAnkle;
+    const leftFootIdx = landmarks[POSE_LANDMARKS.LEFT_FOOT_INDEX] || leftAnkle;
+    const rightFootIdx = landmarks[POSE_LANDMARKS.RIGHT_FOOT_INDEX] || rightAnkle;
+    const leftShoulder = landmarks[POSE_LANDMARKS.LEFT_SHOULDER];
+    const rightShoulder = landmarks[POSE_LANDMARKS.RIGHT_SHOULDER];
+
+    const rawHipY = (leftHip.y + rightHip.y) / 2.0;
+
+    // Weighted lower-limb height: incorporates ankles (50%), heels (30%), and foot indices (20%)
+    const rawLeftFoot = 0.5 * leftAnkle.y + 0.3 * leftHeel.y + 0.2 * leftFootIdx.y;
+    const rawRightFoot = 0.5 * rightAnkle.y + 0.3 * rightHeel.y + 0.2 * rightFootIdx.y;
+    const rawLowerY = (rawLeftFoot + rawRightFoot) / 2.0;
+
+    // Torso length scale normalization
     const shoulderMid = this.getMidpoint(leftShoulder, rightShoulder);
     const hipMid = this.getMidpoint(leftHip, rightHip);
     const currentTorso = Math.hypot(hipMid.x - shoulderMid.x, hipMid.y - shoulderMid.y);
@@ -187,66 +240,107 @@ export class JumpDetector {
 
     // 3. Smooth coordinates & calculate velocity
     const hipResult = this.hipSmoother.update(rawHipY, timestampMs);
-    const ankleResult = this.ankleSmoother.update(rawAnkleY, timestampMs);
+    const lowerResult = this.lowerSmoother.update(rawLowerY, timestampMs);
 
-    // Coordinate system: y goes down (0 at top, 1 at bottom).
-    // An upward jump means current y < baseline y.
-    // Upward displacement = (baselineHipY - hipResult.smoothed) / torsoScale
-    const hipDisplacementNorm = (this.baselineHipY - hipResult.smoothed) / torsoScale;
-    const ankleDisplacementNorm = (this.baselineAnkleY! - ankleResult.smoothed) / torsoScale;
+    // Coordinate system: y goes down (0 = top, 1 = bottom).
+    // Upward displacement = (dynamicBaselineY - currentSmoothedY) / torsoScale
+    const hipDisplacementNorm = (this.dynamicHipY - hipResult.smoothed) / torsoScale;
+    const lowerDisplacementNorm = (this.dynamicLowerY - lowerResult.smoothed) / torsoScale;
 
-    // Upward velocity (positive when moving up): rate of change of upward displacement
-    // Since y is inverted: v_up = - hipResult.velocity / torsoScale
-    const velocityUpward = -hipResult.velocity / torsoScale;
+    // Upward velocity (positive = moving up, negative = descending)
+    const hipVelocityUpward = -hipResult.velocity / torsoScale;
+    const lowerVelocityUpward = -lowerResult.velocity / torsoScale;
+    const combinedVelocityUpward =
+      this.config.hipWeight * hipVelocityUpward + this.config.ankleWeight * lowerVelocityUpward;
 
-    // 4. Combined displacement: requires hips to lift AND ankles to lift
-    // In rope skipping, body lifts as a whole.
-    // Combined displacement prioritizes synchronized vertical lift
-    const combinedDisplacement = 0.6 * hipDisplacementNorm + 0.4 * ankleDisplacementNorm;
+    // Combined displacement signal
+    const combinedDisplacement =
+      this.config.hipWeight * hipDisplacementNorm + this.config.ankleWeight * lowerDisplacementNorm;
 
-    // 5. Anti-false detection checks
-    // Check A: Squatting / Bending knees:
-    // When bending knees, hips move DOWN (hipDisplacementNorm is negative), while ankles remain flat.
-    // So if combinedDisplacement < 0.02, it is not an upward jump.
-    // Check B: Walking / Step-ups:
-    // In walking, one ankle lifts while the other is grounded (asymmetric).
-    // We check that both feet/ankles lift off the ground.
-    const leftAnkleLift = (this.baselineAnkleY! - leftAnkle.y) / torsoScale;
-    const rightAnkleLift = (this.baselineAnkleY! - rightAnkle.y) / torsoScale;
-    const minAnkleLift = Math.min(leftAnkleLift, rightAnkleLift);
-    const bothFeetAirborne = minAnkleLift > 0.05 && combinedDisplacement > 0.10;
+    // 4. Anti-False Detection Checks
 
-    // 6. Adaptive baseline drift compensation when grounded
-    // If the user has been solidly grounded and stable for a while, slowly adjust baseline (0.5% drift)
-    if (
-      this.stateMachine.state === 'GROUNDED' &&
-      Math.abs(hipDisplacementNorm) < 0.04 &&
-      Math.abs(velocityUpward) < 0.1
-    ) {
-      this.baselineHipY = 0.995 * this.baselineHipY + 0.005 * hipResult.smoothed;
-      this.baselineAnkleY = 0.995 * this.baselineAnkleY! + 0.005 * ankleResult.smoothed;
+    // Check A: Squatting / Bending knees
+    // In squatting, hips drop DOWN (hipDisplacementNorm is negative, hips drop towards ankles while ankles stay flat).
+    if (hipDisplacementNorm < -0.035 && lowerDisplacementNorm < 0.02) {
+      this.updateDebugInfo(
+        combinedDisplacement,
+        combinedVelocityUpward,
+        hipVelocityUpward,
+        lowerVelocityUpward,
+        confidence,
+        timestampMs,
+        'Rejected: knee bend / squatting (downward hip displacement)',
+        hipResult.smoothed,
+        lowerResult.smoothed
+      );
+      return false;
     }
 
-    // 7. Update State Machine
+    // Check B: Walking / Asymmetric leg lift
+    // In walking, one foot lifts while the other is planted flat, with minimal hip lift
+    const leftLift = (this.dynamicLeftFootY! - rawLeftFoot) / torsoScale;
+    const rightLift = (this.dynamicRightFootY! - rawRightFoot) / torsoScale;
+    const footLiftDiff = Math.abs(leftLift - rightLift);
+
+    if (footLiftDiff > 0.055 && hipDisplacementNorm < 0.035) {
+      this.updateDebugInfo(
+        combinedDisplacement,
+        combinedVelocityUpward,
+        hipVelocityUpward,
+        lowerVelocityUpward,
+        confidence,
+        timestampMs,
+        'Rejected: walking / asymmetric foot movement',
+        hipResult.smoothed,
+        lowerResult.smoothed
+      );
+      return false;
+    }
+
+    // Both feet airborne indicator
+    const minFootLift = Math.min(leftLift, rightLift);
+    const bothFeetAirborne =
+      (minFootLift > 0.025 && combinedDisplacement > 0.04) ||
+      combinedDisplacement >= this.config.airborneThresholdNorm * 1.1;
+
+    // 5. Dynamic Grounded Baseline Envelope Adaptation
+    // When the user is grounded or landing, adapt baseline towards local ground contact
+    if (
+      (this.stateMachine.state === 'GROUNDED' || this.stateMachine.state === 'LANDING') &&
+      combinedDisplacement < 0.045 &&
+      Math.abs(combinedVelocityUpward) < 0.15
+    ) {
+      const adapt = this.config.dynamicBaselineAdaptRate; // e.g. 0.05
+      this.dynamicHipY = (1.0 - adapt) * this.dynamicHipY + adapt * hipResult.smoothed;
+      this.dynamicLowerY = (1.0 - adapt) * this.dynamicLowerY + adapt * lowerResult.smoothed;
+      this.dynamicLeftFootY = (1.0 - adapt) * this.dynamicLeftFootY! + adapt * rawLeftFoot;
+      this.dynamicRightFootY = (1.0 - adapt) * this.dynamicRightFootY! + adapt * rawRightFoot;
+    }
+
+    // 6. Update State Machine
     const jumpCounted = this.stateMachine.step(
       combinedDisplacement,
-      velocityUpward,
+      combinedVelocityUpward,
       timestampMs,
-      bothFeetAirborne
+      bothFeetAirborne,
+      confidence
     );
 
     if (jumpCounted) {
       this.jumpCount++;
     }
 
-    // 8. Update debug info
+    // 7. Update Debug Info
     this.updateDebugInfo(
       combinedDisplacement,
-      velocityUpward,
+      combinedVelocityUpward,
+      hipVelocityUpward,
+      lowerVelocityUpward,
       confidence,
       timestampMs,
+      this.stateMachine.rejectionReason,
       hipResult.smoothed,
-      ankleResult.smoothed
+      lowerResult.smoothed
     );
 
     return jumpCounted;
@@ -266,26 +360,59 @@ export class JumpDetector {
     }
   }
 
+  private updateInferenceFps(timestampMs: number) {
+    this.inferenceCount++;
+    if (this.lastInferenceTimestamp === 0) {
+      this.lastInferenceTimestamp = timestampMs;
+    } else {
+      const elapsed = timestampMs - this.lastInferenceTimestamp;
+      if (elapsed >= 1000) {
+        this.currentInferenceFps = Math.round((this.inferenceCount * 1000) / elapsed);
+        this.inferenceCount = 0;
+        this.lastInferenceTimestamp = timestampMs;
+      }
+    }
+  }
+
   private updateDebugInfo(
     displacementNorm: number,
     velocity: number,
+    hipVelocity: number,
+    ankleVelocity: number,
     confidence: number,
-    _timestampMs: number,
+    timestampMs: number,
+    rejectionReason: string,
     hipY?: number,
     ankleY?: number
   ) {
+    const timeSinceLastJump =
+      this.stateMachine.lastJumpTime > 0 ? timestampMs - this.stateMachine.lastJumpTime : 0;
+
+    const direction: 'UP' | 'DOWN' | 'STABLE' =
+      velocity > 0.06 ? 'UP' : velocity < -0.06 ? 'DOWN' : 'STABLE';
+
     this.lastDebugInfo = {
       state: this.stateMachine.state,
+      totalJumps: this.jumpCount,
       hipY: hipY ?? this.hipSmoother.current,
-      ankleY: ankleY ?? this.ankleSmoother.current,
+      ankleY: ankleY ?? this.lowerSmoother.current,
       baselineHipY: this.baselineHipY ?? 0,
+      dynamicBaselineY: this.dynamicHipY ?? 0,
       displacementNorm,
       velocity,
+      hipVelocity,
+      ankleVelocity,
       landmarkConfidence: confidence,
       isAirborne: this.stateMachine.state === 'AIRBORNE',
+      airborneDurationMs: this.stateMachine.airborneDuration,
       lastJumpTime: this.stateMachine.lastJumpTime,
-      threshold: 0.16,
+      timeSinceLastJumpMs: Math.round(timeSinceLastJump),
+      threshold: this.config.airborneThresholdNorm,
       fps: this.currentFps,
+      inferenceFps: this.currentInferenceFps,
+      lastRejectionReason: rejectionReason,
+      movementDirection: direction,
+      recentTransitions: this.stateMachine.transitions,
     };
   }
 
@@ -303,7 +430,6 @@ export class JumpDetector {
     for (const idx of requiredIndices) {
       const lm = landmarks[idx];
       if (!lm) return 0;
-      // Default to 1.0 if visibility is undefined (e.g. synthetic data)
       const vis = lm.visibility !== undefined ? lm.visibility : 1.0;
       totalConf += vis;
     }
