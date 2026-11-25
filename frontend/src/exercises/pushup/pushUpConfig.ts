@@ -30,3 +30,4 @@ export const DEFAULT_PUSHUP_CONFIG: PushUpConfig = {
   minLandmarkVisibility: 0.40,
   emaAlpha: 0.60,
 };
+

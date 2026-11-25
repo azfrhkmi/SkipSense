@@ -5,6 +5,7 @@ import { PoseDetectorService } from '../pose/poseDetector';
 import { SkeletonRenderer } from '../pose/skeletonRenderer';
 import { PushUpDetector } from '../exercises/pushup/pushUpDetector';
 import { pushUpSound } from '../exercises/pushup/pushUpSound';
+import { ConfettiBurst } from '../components/ConfettiBurst';
 import {
   PushUpCalibrationState,
   PushUpDebugInfo,
@@ -57,6 +58,10 @@ export const PushUpWorkoutPage: React.FC<PushUpWorkoutPageProps> = ({
   const [isMuted, setIsMuted] = useState(pushUpSound.isMuted());
   const [showDebug, setShowDebug] = useState(false);
   const [celebrationMessage, setCelebrationMessage] = useState<string | null>(null);
+  const [milestoneBanner, setMilestoneBanner] = useState<string | null>(null);
+
+  const elapsedSecondsRef = useRef(0);
+  const milestoneTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const [debugInfo, setDebugInfo] = useState<PushUpDebugInfo>({
     state: 'READY',
@@ -119,6 +124,9 @@ export const PushUpWorkoutPage: React.FC<PushUpWorkoutPageProps> = ({
         cancelAnimationFrame(animationFrameIdRef.current);
       }
       cameraManagerRef.current?.stopCamera();
+      if (milestoneTimerRef.current) {
+        clearTimeout(milestoneTimerRef.current);
+      }
     };
   }, [initCameraAndAI]);
 
@@ -130,7 +138,7 @@ export const PushUpWorkoutPage: React.FC<PushUpWorkoutPageProps> = ({
         cancelAnimationFrame(animationFrameIdRef.current);
       }
 
-      const activeDuration = elapsedSeconds;
+      const activeDuration = elapsedSecondsRef.current;
       const rpm = activeDuration > 0 ? (finalReps / activeDuration) * 60 : 0;
       const startTime = new Date(Date.now() - activeDuration * 1000).toISOString();
       const endTime = new Date().toISOString();
@@ -155,9 +163,9 @@ export const PushUpWorkoutPage: React.FC<PushUpWorkoutPageProps> = ({
       setCelebrationMessage(`${finalReps} REPS COMPLETED! 🎉`);
       setTimeout(() => {
         onFinishWorkout(session);
-      }, 1500);
+      }, 1700);
     },
-    [elapsedSeconds, mode, onFinishWorkout, targetReps]
+    [mode, onFinishWorkout, targetReps]
   );
 
   // Manual stop workout
@@ -238,7 +246,29 @@ export const PushUpWorkoutPage: React.FC<PushUpWorkoutPageProps> = ({
           }
 
           if (didRepComplete) {
-            // Rep completed feedback
+            // Trigger encouraging mid-set callout on halfway, final sprint, or multiples of 5/10
+            let toastMsg: string | null = null;
+            if (targetReps !== null) {
+              const remaining = targetReps - currentCount;
+              if (remaining === Math.floor(targetReps / 2)) {
+                toastMsg = '⚡ HALFWAY THERE! KEEP PUSHING!';
+              } else if (remaining === 3) {
+                toastMsg = '🔥 ONLY 3 REPS LEFT!';
+              } else if (remaining === 1) {
+                toastMsg = '💥 ONE LAST REP! FINISH IT!';
+              }
+            } else if (currentCount > 0 && currentCount % 10 === 0) {
+              toastMsg = `🏆 ${currentCount} REPS! BEAST MODE!`;
+            } else if (currentCount === 5) {
+              toastMsg = '💪 5 REPS LOCKED IN!';
+            }
+
+            if (toastMsg) {
+              pushUpSound.playMilestoneChime();
+              setMilestoneBanner(toastMsg);
+              if (milestoneTimerRef.current) clearTimeout(milestoneTimerRef.current);
+              milestoneTimerRef.current = setTimeout(() => setMilestoneBanner(null), 2100);
+            }
           }
         } else if (detector.currentCalibrationState === 'CALIBRATING_TOP') {
           const done = detector.addCalibrationSample(landmarks, now);
@@ -288,7 +318,11 @@ export const PushUpWorkoutPage: React.FC<PushUpWorkoutPageProps> = ({
   useEffect(() => {
     if (!isWorkoutActive) return;
     const interval = setInterval(() => {
-      setElapsedSeconds((s) => s + 1);
+      setElapsedSeconds((s) => {
+        const next = s + 1;
+        elapsedSecondsRef.current = next;
+        return next;
+      });
     }, 1000);
     return () => clearInterval(interval);
   }, [isWorkoutActive]);
@@ -435,43 +469,47 @@ export const PushUpWorkoutPage: React.FC<PushUpWorkoutPageProps> = ({
 
       {/* Celebration Banner Overlay on Target Reached */}
       {celebrationMessage && (
-        <div
-          style={{
-            position: 'absolute',
-            inset: 0,
-            backgroundColor: 'rgba(9, 11, 13, 0.9)',
-            display: 'flex',
-            flexDirection: 'column',
-            alignItems: 'center',
-            justifyContent: 'center',
-            zIndex: 1000,
-            animation: 'fadeIn 0.3s ease-out',
-          }}
-        >
+        <>
+          <ConfettiBurst active={true} durationMs={2800} />
           <div
             style={{
-              width: 80,
-              height: 80,
-              borderRadius: '50%',
-              backgroundColor: 'rgba(57, 230, 107, 0.2)',
-              border: '2px solid #39E66B',
+              position: 'absolute',
+              inset: 0,
+              backgroundColor: 'rgba(9, 11, 13, 0.9)',
               display: 'flex',
+              flexDirection: 'column',
               alignItems: 'center',
               justifyContent: 'center',
-              color: '#39E66B',
-              marginBottom: 16,
-              boxShadow: '0 0 30px rgba(57, 230, 107, 0.5)',
+              zIndex: 1000,
+              animation: 'fadeIn 0.3s ease-out',
             }}
           >
-            <CheckCircle2 size={48} />
+            <div
+              className="animate-pop"
+              style={{
+                width: 84,
+                height: 84,
+                borderRadius: '50%',
+                backgroundColor: 'rgba(57, 230, 107, 0.2)',
+                border: '2px solid #39E66B',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                color: '#39E66B',
+                marginBottom: 16,
+                boxShadow: '0 0 36px rgba(57, 230, 107, 0.6)',
+              }}
+            >
+              <CheckCircle2 size={50} />
+            </div>
+            <h1 style={{ fontSize: 28, fontWeight: 900, color: '#FFFFFF', marginBottom: 8 }}>
+              {celebrationMessage}
+            </h1>
+            <p style={{ fontSize: 16, color: '#39E66B', fontWeight: 700 }}>
+              Saving workout summary...
+            </p>
           </div>
-          <h1 style={{ fontSize: 28, fontWeight: 900, color: '#FFFFFF', marginBottom: 8 }}>
-            {celebrationMessage}
-          </h1>
-          <p style={{ fontSize: 16, color: '#39E66B', fontWeight: 700 }}>
-            Saving workout summary...
-          </p>
-        </div>
+        </>
       )}
 
       {/* Guided Calibration Overlay */}
@@ -793,66 +831,182 @@ export const PushUpWorkoutPage: React.FC<PushUpWorkoutPageProps> = ({
           {statusMessage}
         </div>
 
-        {/* Primary Repetition Count */}
-        <div style={{ textAlign: 'center', marginBottom: 12 }}>
+        {/* Primary Repetition Count with Circular Progress Ring */}
+        <div
+          style={{
+            position: 'relative',
+            width: 196,
+            height: 196,
+            display: 'flex',
+            flexDirection: 'column',
+            alignItems: 'center',
+            justifyContent: 'center',
+            marginBottom: 14,
+          }}
+        >
+          <svg
+            width={196}
+            height={196}
+            viewBox="0 0 196 196"
+            style={{ position: 'absolute', inset: 0, transform: 'rotate(-90deg)' }}
+          >
+            <circle
+              cx={98}
+              cy={98}
+              r={86}
+              fill="rgba(12, 16, 20, 0.55)"
+              stroke="rgba(255, 255, 255, 0.14)"
+              strokeWidth={10}
+            />
+            <circle
+              cx={98}
+              cy={98}
+              r={86}
+              fill="none"
+              stroke={
+                statusMessage === 'BOTTOM POSITION DETECTED'
+                  ? '#39E66B'
+                  : progressPercent === 100
+                  ? '#39E66B'
+                  : '#5E96FF'
+              }
+              strokeWidth={10}
+              strokeLinecap="round"
+              strokeDasharray={2 * Math.PI * 86}
+              strokeDashoffset={
+                progressPercent !== null
+                  ? 2 * Math.PI * 86 * (1 - progressPercent / 100)
+                  : 2 * Math.PI * 86 * (1 - Math.min(1, (completedReps % 10 || (completedReps > 0 ? 10 : 0)) / 10))
+              }
+              style={{
+                transition: 'stroke-dashoffset 0.3s cubic-bezier(0.22, 1, 0.36, 1), stroke 0.2s ease',
+                filter: 'drop-shadow(0 0 10px rgba(57, 230, 107, 0.45))',
+              }}
+            />
+          </svg>
+
           <div
-            className="tabular-nums"
+            key={completedReps > 0 ? completedReps : 'zero'}
+            className={`tabular-nums ${completedReps > 0 ? 'animate-counter-bump' : ''}`}
             style={{
-              fontSize: 96,
+              position: 'relative',
+              fontSize: 82,
               fontWeight: 900,
-              lineHeight: 1,
+              lineHeight: 0.95,
               color: '#FFFFFF',
-              textShadow: '0 4px 30px rgba(0, 0, 0, 0.8)',
+              textShadow: '0 4px 24px rgba(0, 0, 0, 0.85)',
             }}
           >
             {completedReps}
           </div>
           <div
             style={{
-              fontSize: 18,
+              position: 'relative',
+              fontSize: 13,
               fontWeight: 800,
               color: '#39E66B',
-              letterSpacing: 2,
+              letterSpacing: 1.5,
               textTransform: 'uppercase',
               marginTop: 4,
             }}
           >
-            {targetReps !== null ? `of ${targetReps} Reps` : 'Reps Completed'}
+            {targetReps !== null ? `of ${targetReps} Reps` : 'Freedom Reps'}
           </div>
         </div>
 
-        {/* Progress Bar (Target Modes) */}
-        {progressPercent !== null && (
+        {/* Milestone Toast Banner */}
+        {milestoneBanner && (
+          <div
+            key={milestoneBanner + completedReps}
+            className="animate-toast-float"
+            style={{
+              backgroundColor: 'rgba(18, 22, 26, 0.94)',
+              border: '2px solid #5E96FF',
+              color: '#FFFFFF',
+              padding: '8px 20px',
+              borderRadius: 24,
+              fontSize: 14,
+              fontWeight: 900,
+              letterSpacing: 0.5,
+              marginBottom: 12,
+              boxShadow: '0 6px 24px rgba(94, 150, 255, 0.45)',
+            }}
+          >
+            {milestoneBanner}
+          </div>
+        )}
+
+        {/* Live Chest Depth Meter */}
+        {isWorkoutActive && (
           <div
             style={{
               width: '100%',
               maxWidth: 260,
-              height: 8,
-              backgroundColor: 'rgba(255, 255, 255, 0.15)',
-              borderRadius: 4,
-              overflow: 'hidden',
-              marginBottom: 16,
+              backgroundColor: 'rgba(18, 22, 26, 0.78)',
+              borderRadius: 14,
+              padding: '8px 14px',
+              marginBottom: 14,
+              backdropFilter: 'blur(8px)',
+              border: '1px solid rgba(255, 255, 255, 0.08)',
             }}
           >
             <div
               style={{
-                width: `${progressPercent}%`,
-                height: '100%',
-                backgroundColor: '#39E66B',
-                borderRadius: 4,
-                transition: 'width 0.2s ease-out',
-                boxShadow: '0 0 10px #39E66B',
+                display: 'flex',
+                justifyContent: 'space-between',
+                fontSize: 10,
+                fontWeight: 800,
+                letterSpacing: 0.8,
+                color: debugInfo.proximityScore >= 0.65 ? '#39E66B' : '#929BA3',
+                marginBottom: 5,
               }}
-            />
+            >
+              <span>CHEST PROXIMITY DEPTH</span>
+              <span>
+                {debugInfo.proximityScore >= 0.65 ? 'BOTTOM ZONE ✓' : `${Math.min(100, Math.round(debugInfo.proximityScore * 100))}%`}
+              </span>
+            </div>
+            <div
+              style={{
+                width: '100%',
+                height: 6,
+                backgroundColor: 'rgba(255, 255, 255, 0.12)',
+                borderRadius: 3,
+                overflow: 'hidden',
+                position: 'relative',
+              }}
+            >
+              {/* Target threshold marker at 65% */}
+              <div
+                style={{
+                  position: 'absolute',
+                  left: '65%',
+                  top: 0,
+                  bottom: 0,
+                  width: 2,
+                  backgroundColor: 'rgba(255,255,255,0.5)',
+                  zIndex: 2,
+                }}
+              />
+              <div
+                style={{
+                  width: `${Math.min(100, Math.max(4, Math.round(debugInfo.proximityScore * 100)))}%`,
+                  height: '100%',
+                  backgroundColor: debugInfo.proximityScore >= 0.65 ? '#39E66B' : '#5E96FF',
+                  borderRadius: 3,
+                  transition: 'width 0.08s linear, background-color 0.15s ease',
+                }}
+              />
+            </div>
           </div>
         )}
 
-        {/* Workout Stats: Time & Pace */}
+        {/* Workout Stats: Time, Pace & Est. Burn */}
         <div
           style={{
             display: 'flex',
-            gap: 24,
-            backgroundColor: 'rgba(18, 22, 26, 0.75)',
+            gap: 20,
+            backgroundColor: 'rgba(18, 22, 26, 0.78)',
             padding: '8px 20px',
             borderRadius: 20,
             backdropFilter: 'blur(8px)',
@@ -860,18 +1014,25 @@ export const PushUpWorkoutPage: React.FC<PushUpWorkoutPageProps> = ({
           }}
         >
           <div style={{ textAlign: 'center' }}>
-            <div style={{ fontSize: 11, color: '#8E9AA8', fontWeight: 600 }}>TIME</div>
-            <div style={{ fontSize: 16, fontWeight: 800, color: '#FFFFFF' }}>
+            <div style={{ fontSize: 10, color: '#8E9AA8', fontWeight: 700 }}>TIME</div>
+            <div className="tabular-nums" style={{ fontSize: 15, fontWeight: 800, color: '#FFFFFF' }}>
               {formatTimer(elapsedSeconds)}
             </div>
           </div>
           <div style={{ width: 1, backgroundColor: 'rgba(255, 255, 255, 0.1)' }} />
           <div style={{ textAlign: 'center' }}>
-            <div style={{ fontSize: 11, color: '#8E9AA8', fontWeight: 600 }}>PACE</div>
-            <div style={{ fontSize: 16, fontWeight: 800, color: '#FFFFFF' }}>
+            <div style={{ fontSize: 10, color: '#8E9AA8', fontWeight: 700 }}>PACE</div>
+            <div className="tabular-nums" style={{ fontSize: 15, fontWeight: 800, color: '#FFFFFF' }}>
               {elapsedSeconds > 0
                 ? `${Math.round((completedReps / (elapsedSeconds / 60)) * 10) / 10} RPM`
                 : '0.0 RPM'}
+            </div>
+          </div>
+          <div style={{ width: 1, backgroundColor: 'rgba(255, 255, 255, 0.1)' }} />
+          <div style={{ textAlign: 'center' }}>
+            <div style={{ fontSize: 10, color: '#8E9AA8', fontWeight: 700 }}>BURN</div>
+            <div className="tabular-nums" style={{ fontSize: 15, fontWeight: 800, color: '#FF9F0A' }}>
+              ~{Math.round(completedReps * 0.45 + elapsedSeconds * 0.04)} kcal
             </div>
           </div>
         </div>

@@ -75,6 +75,7 @@ export const App: React.FC = () => {
         <SummaryPage
           session={completedSession}
           onGoHome={handleGoHome}
+          onWorkoutAgain={handleStartSkipping}
           onViewHistory={handleViewHistory}
         />
       )}

@@ -6,6 +6,8 @@ import { PoseDetectorService } from '../pose/poseDetector';
 import { SkeletonRenderer } from '../pose/skeletonRenderer';
 import { WorkoutManager } from '../workout/workoutManager';
 import { DebugPanel } from '../components/DebugPanel';
+import { pushUpSound } from '../exercises/pushup/pushUpSound';
+import { loadDailyGoals } from '../utils/motivationEngine';
 import {
   Square,
   AlertCircle,
@@ -15,6 +17,9 @@ import {
   Play,
   Activity,
   SwitchCamera,
+  Volume2,
+  VolumeX,
+  Flame,
 } from 'lucide-react';
 
 interface WorkoutPageProps {
@@ -42,7 +47,13 @@ export const WorkoutPage: React.FC<WorkoutPageProps> = ({ onFinishWorkout, onExi
   const [cameraError, setCameraError] = useState<string | null>(null);
   const [facingMode, setFacingMode] = useState<'user' | 'environment'>('user');
   const [isSwitchingCamera, setIsSwitchingCamera] = useState(false);
+  const [isMuted, setIsMuted] = useState(pushUpSound.isMuted());
+  const [milestoneBanner, setMilestoneBanner] = useState<string | null>(null);
   const [showDebug, setShowDebug] = useState(false);
+
+  const prevJumpsRef = useRef(0);
+  const milestoneTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const dailyJumpGoal = useRef(loadDailyGoals().dailyJumps).current;
   const [debugInfo, setDebugInfo] = useState<JumpDebugInfo>({
     state: 'GROUNDED',
     totalJumps: 0,
@@ -105,7 +116,26 @@ export const WorkoutPage: React.FC<WorkoutPageProps> = ({ onFinishWorkout, onExi
       // 3. Initialize WorkoutManager
       workoutManagerRef.current = new WorkoutManager({
         onStatusChange: (newStatus) => setStatus(newStatus),
-        onCountChange: (count) => setTotalJumps(count),
+        onCountChange: (count) => {
+          if (count > prevJumpsRef.current) {
+            if (count === 10 || count === 25 || (count > 0 && count % 50 === 0)) {
+              pushUpSound.playMilestoneChime();
+              const msg =
+                count === 10
+                  ? '🔥 10 JUMPS! LOCKED IN!'
+                  : count === 25
+                  ? '⚡ 25 JUMPS! PURE RHYTHM!'
+                  : `🏆 ${count} JUMPS! UNSTOPPABLE!`;
+              setMilestoneBanner(msg);
+              if (milestoneTimerRef.current) clearTimeout(milestoneTimerRef.current);
+              milestoneTimerRef.current = setTimeout(() => setMilestoneBanner(null), 2200);
+            } else {
+              pushUpSound.playJumpTick();
+            }
+          }
+          prevJumpsRef.current = count;
+          setTotalJumps(count);
+        },
         onTimerTick: (actSec, rstSec, pace) => {
           setActiveSeconds(actSec);
           setRestSeconds(rstSec);
@@ -184,6 +214,9 @@ export const WorkoutPage: React.FC<WorkoutPageProps> = ({ onFinishWorkout, onExi
       }
       if (workoutManagerRef.current) {
         workoutManagerRef.current.reset();
+      }
+      if (milestoneTimerRef.current) {
+        clearTimeout(milestoneTimerRef.current);
       }
     };
   }, [initWorkout]);
@@ -304,8 +337,26 @@ export const WorkoutPage: React.FC<WorkoutPageProps> = ({ onFinishWorkout, onExi
           <span>{badge.text}</span>
         </div>
 
-        {/* Right Action Icons: Camera Switch, Debug & Abort */}
-        <div style={{ display: 'flex', gap: 10 }}>
+        {/* Right Action Icons: Sound, Camera Switch, Debug & Abort */}
+        <div style={{ display: 'flex', gap: 8 }}>
+          <button
+            onClick={() => setIsMuted(pushUpSound.toggleMute())}
+            title={isMuted ? 'Unmute Sound Cues' : 'Mute Sound Cues'}
+            style={{
+              width: 38,
+              height: 38,
+              borderRadius: '50%',
+              backgroundColor: 'rgba(27, 32, 36, 0.85)',
+              border: '1px solid var(--border-subtle)',
+              color: isMuted ? 'var(--text-muted)' : 'var(--accent-green)',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+            }}
+          >
+            {isMuted ? <VolumeX size={18} /> : <Volume2 size={18} />}
+          </button>
+
           <button
             onClick={handleSwitchCamera}
             disabled={isSwitchingCamera}
@@ -495,6 +546,30 @@ export const WorkoutPage: React.FC<WorkoutPageProps> = ({ onFinishWorkout, onExi
           </div>
         )}
 
+        {/* Milestone Floating Celebration Toast */}
+        {milestoneBanner && (
+          <div
+            key={milestoneBanner + totalJumps}
+            className="animate-toast-float"
+            style={{
+              position: 'absolute',
+              bottom: 24,
+              backgroundColor: 'rgba(18, 24, 28, 0.94)',
+              border: '2px solid #39E66B',
+              color: '#FFFFFF',
+              padding: '10px 22px',
+              borderRadius: 28,
+              fontSize: 15,
+              fontWeight: 900,
+              letterSpacing: 0.6,
+              boxShadow: '0 8px 28px rgba(57, 230, 107, 0.4)',
+              zIndex: 35,
+            }}
+          >
+            {milestoneBanner}
+          </div>
+        )}
+
         {/* Positioning Guidance Prompt */}
         {(status === 'CALIBRATING' || status === 'IDLE') && !cameraError && (
           <div
@@ -584,20 +659,38 @@ export const WorkoutPage: React.FC<WorkoutPageProps> = ({ onFinishWorkout, onExi
         >
           {/* Main Jump Counter (Dominant visual element) */}
           <div>
-            <div
-              style={{
-                fontSize: 12,
-                fontWeight: 700,
-                color: 'var(--text-secondary)',
-                letterSpacing: 1,
-                textTransform: 'uppercase',
-                marginBottom: 2,
-              }}
-            >
-              Total Jumps
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 2 }}>
+              <span
+                style={{
+                  fontSize: 12,
+                  fontWeight: 700,
+                  color: 'var(--text-secondary)',
+                  letterSpacing: 1,
+                  textTransform: 'uppercase',
+                }}
+              >
+                Total Jumps
+              </span>
+              <span
+                style={{
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  gap: 3,
+                  fontSize: 11,
+                  fontWeight: 800,
+                  color: '#FF9F0A',
+                  backgroundColor: 'rgba(255, 159, 10, 0.14)',
+                  padding: '2px 7px',
+                  borderRadius: 8,
+                }}
+              >
+                <Flame size={11} />
+                ~{Math.round(totalJumps * 0.12 + activeSeconds * 0.03)} kcal
+              </span>
             </div>
             <div
-              className="tabular-nums"
+              key={totalJumps > 0 ? totalJumps : 'zero'}
+              className={`tabular-nums ${totalJumps > 0 ? 'animate-counter-bump' : ''}`}
               style={{
                 fontSize: 68,
                 fontWeight: 900,
@@ -605,9 +698,34 @@ export const WorkoutPage: React.FC<WorkoutPageProps> = ({ onFinishWorkout, onExi
                 letterSpacing: -2,
                 color: status === 'ACTIVE' ? 'var(--accent-green)' : 'var(--text-primary)',
                 transition: 'color 0.2s ease',
+                transformOrigin: 'left bottom',
               }}
             >
               {totalJumps}
+            </div>
+            {/* Live Goal Micro-bar */}
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 6 }}>
+              <div
+                style={{
+                  width: 90,
+                  height: 4,
+                  backgroundColor: 'rgba(255,255,255,0.1)',
+                  borderRadius: 2,
+                  overflow: 'hidden',
+                }}
+              >
+                <div
+                  style={{
+                    width: `${Math.min(100, Math.round((totalJumps / dailyJumpGoal) * 100))}%`,
+                    height: '100%',
+                    backgroundColor: '#39E66B',
+                    transition: 'width 0.25s ease-out',
+                  }}
+                />
+              </div>
+              <span className="tabular-nums" style={{ fontSize: 10, color: 'var(--text-muted)', fontWeight: 700 }}>
+                {Math.min(100, Math.round((totalJumps / dailyJumpGoal) * 100))}% of {dailyJumpGoal} goal
+              </span>
             </div>
           </div>
 

@@ -1,7 +1,24 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { WorkoutSessionData } from '../types/workout';
 import { WorkoutService } from '../workout/workoutService';
-import { CheckCircle2, Home, History, RotateCcw, Flame, Clock, Gauge } from 'lucide-react';
+import { ConfettiBurst } from '../components/ConfettiBurst';
+import {
+  buildMotivationProfile,
+  evaluateSessionHighlights,
+  loadDailyGoals,
+  SessionHighlight,
+} from '../utils/motivationEngine';
+import {
+  CheckCircle2,
+  Home,
+  History,
+  RotateCcw,
+  Flame,
+  Clock,
+  Gauge,
+  Trophy,
+  Sparkles,
+} from 'lucide-react';
 
 interface PushUpSummaryPageProps {
   session: WorkoutSessionData;
@@ -17,21 +34,31 @@ export const PushUpSummaryPage: React.FC<PushUpSummaryPageProps> = ({
   onViewHistory,
 }) => {
   const [isSaved, setIsSaved] = useState(false);
+  const [workoutsAfterSave, setWorkoutsAfterSave] = useState<WorkoutSessionData[]>([session]);
+  const [highlights, setHighlights] = useState<SessionHighlight>(() =>
+    evaluateSessionHighlights(session, [])
+  );
   const saveAttemptedRef = useRef(false);
 
   useEffect(() => {
-    async function autoSave() {
+    async function saveAndComputeMotivation() {
       if (saveAttemptedRef.current) return;
       saveAttemptedRef.current = true;
       try {
-        await WorkoutService.saveWorkout(session);
+        const previousHistory = await WorkoutService.getWorkouts();
+        setHighlights(evaluateSessionHighlights(session, previousHistory));
+
+        const saved = await WorkoutService.saveWorkout(session);
+        setWorkoutsAfterSave([saved, ...previousHistory]);
         setIsSaved(true);
       } catch (err) {
         console.error('Failed to auto-save pushup session:', err);
       }
     }
-    autoSave();
+    saveAndComputeMotivation();
   }, [session]);
+
+  const profile = buildMotivationProfile(workoutsAfterSave, loadDailyGoals());
 
   const formatDuration = (totalSec: number) => {
     const mins = Math.floor(totalSec / 60);
@@ -62,9 +89,12 @@ export const PushUpSummaryPage: React.FC<PushUpSummaryPageProps> = ({
         margin: '0 auto',
       }}
     >
+      <ConfettiBurst active={completedReps > 0} durationMs={2800} />
+
       {/* Header celebration badge */}
-      <div style={{ textAlign: 'center', marginTop: 12, marginBottom: 24 }}>
+      <div style={{ textAlign: 'center', marginTop: 8, marginBottom: 20 }}>
         <div
+          className="animate-pop"
           style={{
             width: 64,
             height: 64,
@@ -75,60 +105,92 @@ export const PushUpSummaryPage: React.FC<PushUpSummaryPageProps> = ({
             display: 'flex',
             alignItems: 'center',
             justifyContent: 'center',
-            margin: '0 auto 16px auto',
+            margin: '0 auto 14px auto',
             boxShadow: '0 0 24px rgba(57, 230, 107, 0.35)',
           }}
         >
           <CheckCircle2 size={36} />
         </div>
-        <h1 style={{ fontSize: 26, fontWeight: 900, letterSpacing: -0.5, marginBottom: 4 }}>
+        <h1 style={{ fontSize: 25, fontWeight: 900, letterSpacing: -0.5, marginBottom: 4 }}>
           {session.completion_status === 'completed'
             ? 'Push-Up Workout Completed!'
             : 'Push-Up Session Finished'}
         </h1>
-        <p style={{ fontSize: 13, color: '#8E9AA8' }}>
-          {new Date(session.end_time).toLocaleDateString(undefined, {
-            weekday: 'long',
-            month: 'short',
-            day: 'numeric',
-            hour: '2-digit',
-            minute: '2-digit',
-          })}
+        <p style={{ fontSize: 13, color: '#8E9AA8', marginBottom: 10 }}>
+          {highlights.encouragementQuote}
         </p>
+
+        {/* Personal Best Tag */}
+        {(highlights.isNewBestCount || highlights.isNewBestPace) && (
+          <div
+            className="animate-pop"
+            style={{
+              display: 'inline-flex',
+              alignItems: 'center',
+              gap: 6,
+              backgroundColor: 'rgba(245, 185, 66, 0.16)',
+              border: '1px solid rgba(245, 185, 66, 0.5)',
+              color: '#F5B942',
+              padding: '5px 14px',
+              borderRadius: 20,
+              fontSize: 12,
+              fontWeight: 800,
+            }}
+          >
+            <Trophy size={14} />
+            <span>
+              {highlights.isNewBestCount ? 'NEW PERSONAL BEST REPS!' : 'NEW BEST CADENCE!'}
+            </span>
+          </div>
+        )}
       </div>
 
       {/* Main Repetition Card */}
       <div
         style={{
-          backgroundColor: '#12161A',
-          border: '1px solid rgba(57, 230, 107, 0.35)',
+          background: 'linear-gradient(155deg, #171E29 0%, #12161A 75%)',
+          border: '1px solid rgba(94, 150, 255, 0.35)',
           borderRadius: 24,
-          padding: 24,
+          padding: 22,
           textAlign: 'center',
-          marginBottom: 20,
+          marginBottom: 16,
           boxShadow: '0 8px 30px rgba(0, 0, 0, 0.5)',
         }}
       >
-        <div
-          style={{
-            display: 'inline-block',
-            fontSize: 11,
-            fontWeight: 800,
-            color: '#39E66B',
-            letterSpacing: 1,
-            textTransform: 'uppercase',
-            backgroundColor: 'rgba(57, 230, 107, 0.15)',
-            padding: '4px 12px',
-            borderRadius: 20,
-            marginBottom: 10,
-          }}
-        >
-          {modeTitle}
+        <div style={{ display: 'flex', justifyContent: 'center', gap: 8, marginBottom: 10 }}>
+          <span
+            style={{
+              fontSize: 11,
+              fontWeight: 800,
+              color: '#5E96FF',
+              letterSpacing: 1,
+              textTransform: 'uppercase',
+              backgroundColor: 'rgba(94, 150, 255, 0.15)',
+              padding: '4px 12px',
+              borderRadius: 20,
+            }}
+          >
+            {modeTitle}
+          </span>
+          <span
+            style={{
+              fontSize: 11,
+              fontWeight: 800,
+              color: highlights.intensityColor,
+              letterSpacing: 0.8,
+              textTransform: 'uppercase',
+              backgroundColor: `${highlights.intensityColor}20`,
+              padding: '4px 12px',
+              borderRadius: 20,
+            }}
+          >
+            {highlights.intensityLabel}
+          </span>
         </div>
         <div
           className="tabular-nums"
           style={{
-            fontSize: 76,
+            fontSize: 74,
             fontWeight: 900,
             lineHeight: 1,
             color: '#FFFFFF',
@@ -137,8 +199,44 @@ export const PushUpSummaryPage: React.FC<PushUpSummaryPageProps> = ({
         >
           {completedReps}
         </div>
-        <div style={{ fontSize: 15, fontWeight: 700, color: '#8E9AA8' }}>
-          {isTargetMode ? `Completed of ${targetReps} Target (${completionPercentage}%)` : 'Total Completed Repetitions'}
+        <div style={{ fontSize: 14, fontWeight: 700, color: '#8E9AA8' }}>
+          {isTargetMode
+            ? `Completed of ${targetReps} Target (${completionPercentage}%) • Est. ${highlights.caloriesBurned} kcal`
+            : `Total Completed Repetitions • Est. ${highlights.caloriesBurned} kcal`}
+        </div>
+      </div>
+
+      {/* XP & Athlete Rank Card */}
+      <div
+        style={{
+          backgroundColor: '#12161A',
+          border: `1px solid ${profile.rank.color}44`,
+          borderRadius: 18,
+          padding: '14px 16px',
+          marginBottom: 16,
+        }}
+      >
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 6 }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 13, fontWeight: 800 }}>
+            <Sparkles size={15} color={profile.rank.color} />
+            <span>
+              Lv.{profile.rank.level} {profile.rank.title}
+            </span>
+          </div>
+          <span className="tabular-nums" style={{ fontSize: 14, fontWeight: 900, color: '#39E66B' }}>
+            +{highlights.xpEarned} XP Earned
+          </span>
+        </div>
+        <div style={{ height: 6, backgroundColor: '#1E252C', borderRadius: 3, overflow: 'hidden' }}>
+          <div
+            style={{
+              width: `${profile.levelProgressPct}%`,
+              height: '100%',
+              backgroundColor: profile.rank.color,
+              borderRadius: 3,
+              transition: 'width 0.7s ease-out',
+            }}
+          />
         </div>
       </div>
 
@@ -148,7 +246,7 @@ export const PushUpSummaryPage: React.FC<PushUpSummaryPageProps> = ({
           display: 'grid',
           gridTemplateColumns: 'repeat(3, 1fr)',
           gap: 12,
-          marginBottom: 24,
+          marginBottom: 20,
         }}
       >
         {/* Duration */}
@@ -157,7 +255,7 @@ export const PushUpSummaryPage: React.FC<PushUpSummaryPageProps> = ({
             backgroundColor: '#12161A',
             border: '1px solid #232930',
             borderRadius: 16,
-            padding: 16,
+            padding: 14,
             textAlign: 'center',
           }}
         >
@@ -172,10 +270,10 @@ export const PushUpSummaryPage: React.FC<PushUpSummaryPageProps> = ({
           >
             <Clock size={18} />
           </div>
-          <div style={{ fontSize: 11, color: '#8E9AA8', fontWeight: 600, marginBottom: 2 }}>
+          <div style={{ fontSize: 10, color: '#8E9AA8', fontWeight: 700, marginBottom: 2 }}>
             DURATION
           </div>
-          <div style={{ fontSize: 16, fontWeight: 800, color: '#FFFFFF' }}>
+          <div className="tabular-nums" style={{ fontSize: 16, fontWeight: 800, color: '#FFFFFF' }}>
             {formatDuration(session.active_duration_seconds)}
           </div>
         </div>
@@ -186,7 +284,7 @@ export const PushUpSummaryPage: React.FC<PushUpSummaryPageProps> = ({
             backgroundColor: '#12161A',
             border: '1px solid #232930',
             borderRadius: 16,
-            padding: 16,
+            padding: 14,
             textAlign: 'center',
           }}
         >
@@ -195,27 +293,27 @@ export const PushUpSummaryPage: React.FC<PushUpSummaryPageProps> = ({
               display: 'flex',
               alignItems: 'center',
               justifyContent: 'center',
-              color: '#39E66B',
+              color: '#5E96FF',
               marginBottom: 6,
             }}
           >
             <Gauge size={18} />
           </div>
-          <div style={{ fontSize: 11, color: '#8E9AA8', fontWeight: 600, marginBottom: 2 }}>
+          <div style={{ fontSize: 10, color: '#8E9AA8', fontWeight: 700, marginBottom: 2 }}>
             CADENCE
           </div>
-          <div style={{ fontSize: 16, fontWeight: 800, color: '#FFFFFF' }}>
+          <div className="tabular-nums" style={{ fontSize: 16, fontWeight: 800, color: '#FFFFFF' }}>
             {session.average_jumps_per_minute} RPM
           </div>
         </div>
 
-        {/* Completion Status */}
+        {/* Calories Burned */}
         <div
           style={{
             backgroundColor: '#12161A',
             border: '1px solid #232930',
             borderRadius: 16,
-            padding: 16,
+            padding: 14,
             textAlign: 'center',
           }}
         >
@@ -224,24 +322,17 @@ export const PushUpSummaryPage: React.FC<PushUpSummaryPageProps> = ({
               display: 'flex',
               alignItems: 'center',
               justifyContent: 'center',
-              color: '#39E66B',
+              color: '#FF9F0A',
               marginBottom: 6,
             }}
           >
             <Flame size={18} />
           </div>
-          <div style={{ fontSize: 11, color: '#8E9AA8', fontWeight: 600, marginBottom: 2 }}>
-            STATUS
+          <div style={{ fontSize: 10, color: '#8E9AA8', fontWeight: 700, marginBottom: 2 }}>
+            EST. BURN
           </div>
-          <div
-            style={{
-              fontSize: 14,
-              fontWeight: 800,
-              color: session.completion_status === 'completed' ? '#39E66B' : '#FF9F0A',
-              textTransform: 'uppercase',
-            }}
-          >
-            {session.completion_status || 'COMPLETED'}
+          <div className="tabular-nums" style={{ fontSize: 16, fontWeight: 800, color: '#FF9F0A' }}>
+            {highlights.caloriesBurned} kcal
           </div>
         </div>
       </div>
@@ -251,17 +342,22 @@ export const PushUpSummaryPage: React.FC<PushUpSummaryPageProps> = ({
         style={{
           display: 'flex',
           alignItems: 'center',
-          gap: 8,
+          justifyContent: 'space-between',
           backgroundColor: isSaved ? 'rgba(57, 230, 107, 0.1)' : '#181E24',
           border: isSaved ? '1px solid rgba(57, 230, 107, 0.3)' : '1px solid #232930',
           padding: '12px 16px',
           borderRadius: 14,
-          marginBottom: 24,
+          marginBottom: 22,
         }}
       >
-        <CheckCircle2 size={16} color={isSaved ? '#39E66B' : '#8E9AA8'} />
-        <span style={{ fontSize: 13, color: isSaved ? '#39E66B' : '#8E9AA8', fontWeight: 600 }}>
-          {isSaved ? 'Session saved to SQLite database' : 'Saving session...'}
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+          <CheckCircle2 size={16} color={isSaved ? '#39E66B' : '#8E9AA8'} />
+          <span style={{ fontSize: 13, color: isSaved ? '#39E66B' : '#8E9AA8', fontWeight: 600 }}>
+            {isSaved ? 'Session saved to SQLite database' : 'Saving session...'}
+          </span>
+        </div>
+        <span style={{ fontSize: 12, fontWeight: 800, color: '#FF9F0A' }}>
+          🔥 {profile.currentStreak}d Streak
         </span>
       </div>
 
@@ -280,8 +376,6 @@ export const PushUpSummaryPage: React.FC<PushUpSummaryPageProps> = ({
             alignItems: 'center',
             justifyContent: 'center',
             gap: 8,
-            border: 'none',
-            cursor: 'pointer',
             boxShadow: '0 4px 20px rgba(57, 230, 107, 0.35)',
           }}
         >
@@ -304,7 +398,6 @@ export const PushUpSummaryPage: React.FC<PushUpSummaryPageProps> = ({
               justifyContent: 'center',
               gap: 8,
               border: '1px solid #232930',
-              cursor: 'pointer',
             }}
           >
             <History size={16} />
@@ -325,7 +418,6 @@ export const PushUpSummaryPage: React.FC<PushUpSummaryPageProps> = ({
               justifyContent: 'center',
               gap: 8,
               border: '1px solid #232930',
-              cursor: 'pointer',
             }}
           >
             <Home size={16} />

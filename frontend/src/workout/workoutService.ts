@@ -98,10 +98,17 @@ export class WorkoutService {
 
   private static getLocalStats(): LifetimeStats {
     const workouts = this.getLocalWorkouts();
-    const totalJumps = workouts.reduce((sum, w) => sum + (w.total_jumps || 0), 0);
+    const skipping = workouts.filter((w) => w.exercise_type !== 'push_up');
+    const pushups = workouts.filter((w) => w.exercise_type === 'push_up');
+
+    const totalJumps = skipping.reduce((sum, w) => sum + (w.total_jumps || 0), 0);
     const totalActiveSec = workouts.reduce((sum, w) => sum + (w.active_duration_seconds || 0), 0);
-    const bestJumps = workouts.reduce((max, w) => Math.max(max, w.total_jumps || 0), 0);
-    const bestPace = workouts.reduce((max, w) => Math.max(max, w.average_jumps_per_minute || 0), 0);
+    const bestJumps = skipping.reduce((max, w) => Math.max(max, w.total_jumps || 0), 0);
+    const bestPace = skipping.reduce((max, w) => Math.max(max, w.average_jumps_per_minute || 0), 0);
+
+    const totalPushups = pushups.reduce((sum, w) => sum + (w.completed_reps ?? w.total_jumps ?? 0), 0);
+    const bestPushups = pushups.reduce((max, w) => Math.max(max, w.completed_reps ?? w.total_jumps ?? 0), 0);
+    const bestPushupPace = pushups.reduce((max, w) => Math.max(max, w.average_jumps_per_minute || 0), 0);
 
     return {
       total_lifetime_jumps: totalJumps,
@@ -109,6 +116,10 @@ export class WorkoutService {
       total_active_duration_seconds: totalActiveSec,
       best_record_jumps: bestJumps,
       best_record_pace: Math.round(bestPace * 10) / 10,
+      total_lifetime_pushups: totalPushups,
+      total_pushup_sessions: pushups.length,
+      best_record_pushups: bestPushups,
+      best_pushup_pace: Math.round(bestPushupPace * 10) / 10,
     };
   }
 }
