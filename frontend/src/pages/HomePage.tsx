@@ -512,7 +512,7 @@ export const HomePage: React.FC<HomePageProps> = ({
                   </span>
                 </div>
                 <p style={{ fontSize: 12.5, color: '#929BA3', lineHeight: 1.4 }}>
-                  Standing full-body tracking with auto-pause &amp; live cadence pace.
+                  Standing full-body tracking with continuous workout timer &amp; live cadence.
                 </p>
               </div>
             </div>

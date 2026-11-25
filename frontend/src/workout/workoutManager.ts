@@ -15,26 +15,32 @@ export interface WorkoutCallbacks {
   onWorkoutComplete: (session: WorkoutSessionData) => void;
 }
 
+export interface WorkoutManagerOptions {
+  autoPauseEnabled?: boolean;
+}
+
 export class WorkoutManager {
   private jumpDetector: JumpDetector;
   private poseProcessor: PoseProcessor;
   private timer: WorkoutTimer;
   private callbacks: WorkoutCallbacks;
+  private autoPauseEnabled: boolean;
 
   private status: WorkoutStatus = 'IDLE';
   private countdownTimerId: any = null;
   private countdownSeconds = 3;
   private startTime: string | null = null;
 
-  // Auto-pause duration: exactly 5 seconds of inactivity
+  // Auto-pause duration (only active when autoPauseEnabled is true)
   private readonly AUTO_PAUSE_MS = 5000;
   private lastJumpOrActivityTime = 0;
 
   // Consecutive tracking loss debouncer to avoid single-frame motion blur dropouts
   private trackingLostFrames = 0;
 
-  constructor(callbacks: WorkoutCallbacks) {
+  constructor(callbacks: WorkoutCallbacks, options: WorkoutManagerOptions = {}) {
     this.callbacks = callbacks;
+    this.autoPauseEnabled = options.autoPauseEnabled ?? false;
     this.jumpDetector = new JumpDetector();
     this.poseProcessor = new PoseProcessor();
     this.timer = new WorkoutTimer();
@@ -106,8 +112,17 @@ export class WorkoutManager {
           this.lastJumpOrActivityTime = timestampMs;
         }
 
-        // Debounce tracking loss against single-frame motion blur of spinning rope/feet
+        // Keep continuous timer advancing on every frame unless auto-pause stops tracking
         if (!positionStatus.isFullyVisible || landmarks.length === 0) {
+          if (!this.autoPauseEnabled) {
+            const timerStats = this.timer.update(true, false, timestampMs);
+            this.callbacks.onTimerTick(
+              timerStats.activeSeconds,
+              timerStats.restSeconds,
+              timerStats.currentPaceJpm
+            );
+          }
+
           this.trackingLostFrames++;
           if (this.trackingLostFrames >= DEFAULT_JUMP_CONFIG.trackingLostGraceFrames) {
             this.status = 'TRACKING_LOST';
@@ -127,7 +142,7 @@ export class WorkoutManager {
           this.callbacks.onCountChange(this.jumpDetector.totalJumps);
         }
 
-        // Update timer
+        // Update timer continuously while workout is active
         const timerStats = this.timer.update(true, false, timestampMs);
         this.callbacks.onTimerTick(
           timerStats.activeSeconds,
@@ -135,8 +150,12 @@ export class WorkoutManager {
           timerStats.currentPaceJpm
         );
 
-        // Auto-pause check: 5 seconds without jump
-        if (this.lastJumpOrActivityTime > 0 && timestampMs - this.lastJumpOrActivityTime >= this.AUTO_PAUSE_MS) {
+        // Optional auto-pause check (disabled by default so brief breaths don't pause timer)
+        if (
+          this.autoPauseEnabled &&
+          this.lastJumpOrActivityTime > 0 &&
+          timestampMs - this.lastJumpOrActivityTime >= this.AUTO_PAUSE_MS
+        ) {
           this.status = 'PAUSED';
           this.callbacks.onStatusChange(this.status);
         }
@@ -170,10 +189,17 @@ export class WorkoutManager {
       }
 
       case 'TRACKING_LOST': {
-        // Paused while tracking is lost
-        this.timer.update(false, false, timestampMs);
+        // Keep workout clock running continuously unless auto-pause mode is explicitly enabled
+        const timerStats = this.timer.update(!this.autoPauseEnabled, false, timestampMs);
+        if (!this.autoPauseEnabled) {
+          this.callbacks.onTimerTick(
+            timerStats.activeSeconds,
+            timerStats.restSeconds,
+            timerStats.currentPaceJpm
+          );
+        }
 
-        // If tracking returns and user is stable, resume previous active state
+        // If tracking returns and user is stable, resume active state
         if (positionStatus.isFullyVisible && positionStatus.isCentered) {
           this.trackingLostFrames = 0;
           this.status = 'ACTIVE';

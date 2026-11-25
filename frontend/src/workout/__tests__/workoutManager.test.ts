@@ -95,7 +95,7 @@ describe('WorkoutManager Lifecycle and Auto-Pause/Resume', () => {
     expect(manager.currentStatus).toBe('ACTIVE');
   });
 
-  it('auto-pauses after 5 seconds of inactivity and preserves count', () => {
+  it('keeps active timer running continuously during brief rests by default (does not auto-pause)', () => {
     const onStatusChange = vi.fn();
     const manager = new WorkoutManager({
       onStatusChange,
@@ -118,14 +118,50 @@ describe('WorkoutManager Lifecycle and Auto-Pause/Resume', () => {
     vi.advanceTimersByTime(3000);
     expect(manager.currentStatus).toBe('ACTIVE');
 
-    // Idle for 5.1 seconds in ACTIVE state without jumps
+    // Idle for 6 seconds in ACTIVE state without jumps (taking a breather)
+    const startTime = time;
+    while (time - startTime < 6000) {
+      manager.processFrame(pose, time);
+      time += 100;
+    }
+
+    // Must remain ACTIVE and continue counting activeSeconds with zero restSeconds
+    expect(manager.currentStatus).toBe('ACTIVE');
+    expect(manager.activeSeconds).toBeGreaterThanOrEqual(5);
+    expect(manager.restSeconds).toBe(0);
+  });
+
+  it('auto-pauses after 5 seconds only when autoPauseEnabled is explicitly true', () => {
+    const onStatusChange = vi.fn();
+    const manager = new WorkoutManager(
+      {
+        onStatusChange,
+        onCountChange: vi.fn(),
+        onTimerTick: vi.fn(),
+        onCountdownTick: vi.fn(),
+        onPositionFeedback: vi.fn(),
+        onDebugUpdate: vi.fn(),
+        onWorkoutComplete: vi.fn(),
+      },
+      { autoPauseEnabled: true }
+    );
+
+    manager.startWorkoutFlow();
+    let time = 1000;
+    const pose = createMockPose();
+    for (let i = 0; i < 16; i++) {
+      manager.processFrame(pose, time);
+      time += 33;
+    }
+    vi.advanceTimersByTime(3000);
+    expect(manager.currentStatus).toBe('ACTIVE');
+
     const startTime = time;
     while (time - startTime < 5100) {
       manager.processFrame(pose, time);
       time += 100;
     }
 
-    // Must be PAUSED now
     expect(manager.currentStatus).toBe('PAUSED');
   });
 

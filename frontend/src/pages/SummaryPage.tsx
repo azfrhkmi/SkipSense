@@ -252,7 +252,9 @@ export const SummaryPage: React.FC<SummaryPageProps> = ({
             {formatDuration(session.active_duration_seconds)}
           </div>
           <div style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 2 }}>
-            Rest: {formatDuration(session.rest_duration_seconds)}
+            {session.rest_duration_seconds > 0
+              ? `Rest: ${formatDuration(session.rest_duration_seconds)}`
+              : 'Continuous timer'}
           </div>
         </div>
 
