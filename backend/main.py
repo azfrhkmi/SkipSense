@@ -8,7 +8,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 
-from .database import BASE_DIR, IS_VERCEL, get_db, init_db
+from .database import BASE_DIR, IS_VERCEL, ensure_db_initialized, get_db, get_db_diagnostics
 from .routers import admin, auth, stats, workouts
 from .security import detect_malicious_payload, get_client_ip, log_security_event
 
@@ -17,7 +17,7 @@ mimetypes.add_type("application/wasm", ".wasm")
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    init_db()
+    ensure_db_initialized()
     yield
 
 
@@ -118,7 +118,13 @@ app.include_router(admin.router)
 
 @app.get("/api/health")
 def health_check():
-    return {"status": "ok", "app": "SkipSense v1.3"}
+    ensure_db_initialized()
+    return {
+        "status": "ok",
+        "app": "SkipSense v1.3",
+        "db": get_db_diagnostics(),
+        "dist_exists": _DIST_DIR.exists(),
+    }
 
 
 # Mount built Vite frontend (used as fallback in Vercel FastAPI mode or unified local serving)

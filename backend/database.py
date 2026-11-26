@@ -1,23 +1,44 @@
 import os
+import re
+from typing import Optional
 from sqlalchemy import create_engine, text
 from sqlalchemy.orm import declarative_base, sessionmaker
+from sqlalchemy.pool import NullPool
 
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 IS_VERCEL = bool(os.getenv("VERCEL"))
 
 
+def _clean_db_url(raw: str) -> str:
+    val = raw.strip()
+    # Handle accidental paste of KEY=value from .env
+    if val.upper().startswith("DATABASE_URL="):
+        val = val.split("=", 1)[1].strip()
+    elif val.upper().startswith("POSTGRES_URL="):
+        val = val.split("=", 1)[1].strip()
+
+    # Handle accidental paste of Neon CLI snippet: psql 'postgresql://...'
+    if val.lower().startswith("psql "):
+        val = val[5:].strip()
+
+    # Strip surrounding single or double quotes
+    if len(val) >= 2 and ((val[0] == "'" and val[-1] == "'") or (val[0] == '"' and val[-1] == '"')):
+        val = val[1:-1].strip()
+
+    # Normalize postgres:// -> postgresql+psycopg:// for SQLAlchemy + Psycopg 3
+    if val.startswith("postgres://"):
+        return val.replace("postgres://", "postgresql+psycopg://", 1)
+    if val.startswith("postgresql://"):
+        return val.replace("postgresql://", "postgresql+psycopg://", 1)
+    return val
+
+
 def _resolve_database_url() -> str:
     env_url = os.getenv("DATABASE_URL") or os.getenv("POSTGRES_URL")
-    if env_url:
-        # Normalize Neon / Heroku postgres:// -> postgresql+psycopg:// for SQLAlchemy + Psycopg 3
-        if env_url.startswith("postgres://"):
-            return env_url.replace("postgres://", "postgresql+psycopg://", 1)
-        if env_url.startswith("postgresql://"):
-            return env_url.replace("postgresql://", "postgresql+psycopg://", 1)
-        return env_url
+    if env_url and env_url.strip():
+        return _clean_db_url(env_url)
 
     if IS_VERCEL:
-        # Ephemeral fallback only if DATABASE_URL wasn't configured yet on Vercel
         return "sqlite:////tmp/skipsense.db"
 
     data_dir = os.path.join(BASE_DIR, "data")
@@ -29,26 +50,46 @@ def _resolve_database_url() -> str:
 DATABASE_URL = _resolve_database_url()
 IS_SQLITE = DATABASE_URL.startswith("sqlite")
 
-engine_kwargs = {"pool_pre_ping": True}
-if IS_SQLITE:
-    engine_kwargs["connect_args"] = {"check_same_thread": False}
-else:
-    # Serverless connection pool tuning for Neon/Supabase PostgreSQL
-    engine_kwargs["pool_recycle"] = 300
-    engine_kwargs["pool_size"] = 5
-    engine_kwargs["max_overflow"] = 5
+_db_config_error: Optional[str] = None
+_db_initialized = False
+_db_init_error: Optional[str] = None
 
-engine = create_engine(DATABASE_URL, **engine_kwargs)
+
+def _build_engine():
+    global DATABASE_URL, IS_SQLITE, _db_config_error
+    try:
+        kwargs = {"pool_pre_ping": True}
+        if IS_SQLITE:
+            kwargs["connect_args"] = {"check_same_thread": False}
+        else:
+            kwargs["connect_args"] = {"connect_timeout": 8}
+            if IS_VERCEL:
+                # Serverless functions work cleanest with NullPool or Neon's external PgBouncer pooler
+                kwargs["poolclass"] = NullPool
+            else:
+                kwargs["pool_recycle"] = 300
+                kwargs["pool_size"] = 5
+                kwargs["max_overflow"] = 5
+        return create_engine(DATABASE_URL, **kwargs)
+    except Exception as exc:
+        _db_config_error = f"DB URL error ({type(exc).__name__}): check DATABASE_URL format"
+        print(_db_config_error)
+        DATABASE_URL = "sqlite:////tmp/skipsense_fallback.db" if IS_VERCEL else f"sqlite:///{os.path.join(BASE_DIR, 'data', 'skipsense.db')}"
+        IS_SQLITE = True
+        return create_engine(DATABASE_URL, connect_args={"check_same_thread": False})
+
+
+engine = _build_engine()
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 Base = declarative_base()
 
 
-def get_db():
-    db = SessionLocal()
-    try:
-        yield db
-    finally:
-        db.close()
+def get_db_diagnostics() -> dict:
+    return {
+        "backend": "sqlite" if IS_SQLITE else "postgresql",
+        "initialized": _db_initialized,
+        "error": _db_config_error or _db_init_error,
+    }
 
 
 def migrate_db():
@@ -74,7 +115,6 @@ def migrate_db():
                             )
                 conn.commit()
             else:
-                # PostgreSQL safe column migrations if upgrading an existing database
                 pg_alters = [
                     "ALTER TABLE workout_sessions ADD COLUMN IF NOT EXISTS user_id INTEGER REFERENCES users(id) ON DELETE CASCADE",
                     "ALTER TABLE workout_sessions ADD COLUMN IF NOT EXISTS exercise_type VARCHAR(20) DEFAULT 'skipping'",
@@ -94,7 +134,7 @@ def bootstrap_admin_from_env():
     """Creates or ensures admin account if ADMIN_EMAIL & ADMIN_PASSWORD are provided via env."""
     admin_email = os.getenv("ADMIN_EMAIL", "").strip().lower()
     admin_password = os.getenv("ADMIN_PASSWORD", "")
-    admin_username = os.getenv("ADMIN_USERNAME", "admin").strip()
+    admin_username = os.getenv("ADMIN_USERNAME", "admin").strip() or "admin"
 
     if not admin_email or not admin_password:
         return
@@ -106,8 +146,13 @@ def bootstrap_admin_from_env():
     try:
         existing = db.query(models.User).filter(models.User.email == admin_email).first()
         if not existing:
+            # Ensure username doesn't collide
+            safe_username = re.sub(r"[^a-zA-Z0-9_.-]", "", admin_username)[:30] or "admin"
+            if db.query(models.User).filter(models.User.username == safe_username).first():
+                safe_username = f"{safe_username}_admin"[:30]
+
             admin_user = models.User(
-                username=admin_username,
+                username=safe_username,
                 email=admin_email,
                 password_hash=hash_password(admin_password),
                 role="admin",
@@ -118,7 +163,6 @@ def bootstrap_admin_from_env():
             db.commit()
             db.refresh(admin_user)
 
-            # Claim any pre-auth local legacy workouts for initial admin owner
             db.query(models.WorkoutSession).filter(
                 models.WorkoutSession.user_id.is_(None)
             ).update({"user_id": admin_user.id})
@@ -130,8 +174,37 @@ def bootstrap_admin_from_env():
         db.close()
 
 
+def ensure_db_initialized() -> bool:
+    """Thread/cold-start safe lazy DB initializer that never crashes module import."""
+    global _db_initialized, _db_init_error
+    if _db_config_error:
+        return False
+    if _db_initialized:
+        return True
+    try:
+        from . import models  # noqa: F401
+        Base.metadata.create_all(bind=engine)
+        migrate_db()
+        bootstrap_admin_from_env()
+        _db_initialized = True
+        _db_init_error = None
+        return True
+    except Exception as exc:
+        # Redact credentials if any URL leaked in exception message
+        safe_msg = re.sub(r"://[^@]+@", "://***:***@", str(exc))
+        _db_init_error = f"{type(exc).__name__}: {safe_msg[:180]}"
+        print(f"Database init warning: {_db_init_error}")
+        return False
+
+
 def init_db():
-    from . import models  # noqa: F401
-    Base.metadata.create_all(bind=engine)
-    migrate_db()
-    bootstrap_admin_from_env()
+    ensure_db_initialized()
+
+
+def get_db():
+    ensure_db_initialized()
+    db = SessionLocal()
+    try:
+        yield db
+    finally:
+        db.close()
