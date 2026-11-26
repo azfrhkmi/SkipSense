@@ -1,13 +1,23 @@
 import { WorkoutSessionData, LifetimeStats } from '../types/workout';
+import { apiFetch } from '../services/authService';
 
-const LOCAL_STORAGE_KEY = 'skipsense_local_workouts';
+const BASE_CACHE_KEY = 'skipsense_local_workouts';
+let activeCacheScope = 'anon';
 
 export class WorkoutService {
   private static baseUrl = '/api';
 
+  public static setUserCacheScope(userId: number | null) {
+    activeCacheScope = userId !== null ? `u_${userId}` : 'anon';
+  }
+
+  private static get cacheKey(): string {
+    return `${BASE_CACHE_KEY}_${activeCacheScope}`;
+  }
+
   public static async getStats(): Promise<LifetimeStats> {
     try {
-      const res = await fetch(`${this.baseUrl}/stats`);
+      const res = await apiFetch(`${this.baseUrl}/stats`);
       if (!res.ok) throw new Error(`HTTP error ${res.status}`);
       return await res.json();
     } catch (e) {
@@ -21,12 +31,11 @@ export class WorkoutService {
       const url = exerciseType
         ? `${this.baseUrl}/workouts?exercise_type=${encodeURIComponent(exerciseType)}`
         : `${this.baseUrl}/workouts`;
-      const res = await fetch(url);
+      const res = await apiFetch(url);
       if (!res.ok) throw new Error(`HTTP error ${res.status}`);
       const workouts: WorkoutSessionData[] = await res.json();
-      // If fetching all, cache locally
       if (!exerciseType) {
-        localStorage.setItem(LOCAL_STORAGE_KEY, JSON.stringify(workouts));
+        localStorage.setItem(this.cacheKey, JSON.stringify(workouts));
       }
       return workouts;
     } catch (e) {
@@ -38,7 +47,7 @@ export class WorkoutService {
 
   public static async getWorkout(id: number): Promise<WorkoutSessionData> {
     try {
-      const res = await fetch(`${this.baseUrl}/workouts/${id}`);
+      const res = await apiFetch(`${this.baseUrl}/workouts/${id}`);
       if (!res.ok) throw new Error(`HTTP error ${res.status}`);
       return await res.json();
     } catch (e) {
@@ -50,16 +59,14 @@ export class WorkoutService {
 
   public static async saveWorkout(session: WorkoutSessionData): Promise<WorkoutSessionData> {
     try {
-      const res = await fetch(`${this.baseUrl}/workouts`, {
+      const res = await apiFetch(`${this.baseUrl}/workouts`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(session),
       });
       if (!res.ok) throw new Error(`HTTP error ${res.status}`);
       const saved = await res.json();
-      // Also update local cache
       const cached = this.getLocalWorkouts();
-      localStorage.setItem(LOCAL_STORAGE_KEY, JSON.stringify([saved, ...cached]));
+      localStorage.setItem(this.cacheKey, JSON.stringify([saved, ...cached]));
       return saved;
     } catch (e) {
       console.warn('Failed to save to backend, storing in local offline storage:', e);
@@ -69,14 +76,14 @@ export class WorkoutService {
         id: Date.now(),
         created_at: new Date().toISOString(),
       };
-      localStorage.setItem(LOCAL_STORAGE_KEY, JSON.stringify([mockSaved, ...localList]));
+      localStorage.setItem(this.cacheKey, JSON.stringify([mockSaved, ...localList]));
       return mockSaved;
     }
   }
 
   public static async deleteWorkout(id: number): Promise<void> {
     try {
-      const res = await fetch(`${this.baseUrl}/workouts/${id}`, {
+      const res = await apiFetch(`${this.baseUrl}/workouts/${id}`, {
         method: 'DELETE',
       });
       if (!res.ok) throw new Error(`HTTP error ${res.status}`);
@@ -84,12 +91,12 @@ export class WorkoutService {
       console.warn('Backend delete failed, removing locally:', e);
     }
     const cached = this.getLocalWorkouts().filter((w) => w.id !== id);
-    localStorage.setItem(LOCAL_STORAGE_KEY, JSON.stringify(cached));
+    localStorage.setItem(this.cacheKey, JSON.stringify(cached));
   }
 
   private static getLocalWorkouts(): WorkoutSessionData[] {
     try {
-      const data = localStorage.getItem(LOCAL_STORAGE_KEY);
+      const data = localStorage.getItem(this.cacheKey);
       return data ? JSON.parse(data) : [];
     } catch {
       return [];
@@ -123,4 +130,3 @@ export class WorkoutService {
     };
   }
 }
-

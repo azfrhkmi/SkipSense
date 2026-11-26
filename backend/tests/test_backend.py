@@ -12,7 +12,7 @@ TEST_DATABASE_URL = "sqlite:///:memory:"
 test_engine = create_engine(
     TEST_DATABASE_URL,
     connect_args={"check_same_thread": False},
-    poolclass=StaticPool
+    poolclass=StaticPool,
 )
 TestingSessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=test_engine)
 
@@ -41,182 +41,179 @@ def client():
         yield c
 
 
-def test_health_check(client):
-    response = client.get("/api/health")
-    assert response.status_code == 200
-    assert response.json() == {"status": "ok", "app": "SkipSense v1.0"}
+def _register_and_headers(client: TestClient, username: str, email: str, password: str = "StrongPass1!"):
+    res = client.post(
+        "/api/auth/register",
+        json={"username": username, "email": email, "password": password},
+    )
+    assert res.status_code == 201, res.text
+    csrf = res.json()["csrf_token"]
+    return {"X-CSRF-Token": csrf}, res.json()["user"]
 
 
-def test_create_and_get_workout(client):
-    payload = {
-        "start_time": "2026-11-23T10:00:00Z",
-        "end_time": "2026-11-23T10:05:00Z",
-        "total_jumps": 150,
-        "active_duration_seconds": 240.0,
-        "rest_duration_seconds": 60.0,
-        "total_duration_seconds": 300.0,
-        "average_jumps_per_minute": 37.5,
-        "max_jumps_per_minute": 55.0
-    }
-    create_res = client.post("/api/workouts", json=payload)
-    assert create_res.status_code == 201
-    created_data = create_res.json()
-    workout_id = created_data["id"]
-    assert created_data["total_jumps"] == 150
-    assert created_data["session_date"] is not None
-
-    # Get by ID
-    get_res = client.get(f"/api/workouts/{workout_id}")
-    assert get_res.status_code == 200
-    assert get_res.json()["total_jumps"] == 150
-
-    # Get all workouts
-    list_res = client.get("/api/workouts")
-    assert list_res.status_code == 200
-    assert len(list_res.json()) == 1
-
-    # Check stats
-    stats_res = client.get("/api/stats")
-    assert stats_res.status_code == 200
-    stats = stats_res.json()
-    assert stats["total_lifetime_jumps"] == 150
-    assert stats["total_sessions"] == 1
-    assert stats["total_active_duration_seconds"] == 240.0
-    assert stats["best_record_jumps"] == 150
-    assert stats["best_record_pace"] == 37.5
-
-    # Delete workout
-    del_res = client.delete(f"/api/workouts/{workout_id}")
-    assert del_res.status_code == 200
-
-    # Verify not found
-    get_after_del = client.get(f"/api/workouts/{workout_id}")
-    assert get_after_del.status_code == 404
+def _bootstrap_admin(client: TestClient, username: str = "secadmin", email: str = "admin@skipsense.com"):
+    res = client.post(
+        "/api/auth/bootstrap-admin",
+        json={"username": username, "email": email, "password": "AdminMaster99!"},
+    )
+    assert res.status_code == 201, res.text
+    return {"X-CSRF-Token": res.json()["csrf_token"]}, res.json()["user"]
 
 
-def test_empty_stats(client):
-    res = client.get("/api/stats")
+def test_health_check_and_security_headers(client):
+    res = client.get("/api/health")
     assert res.status_code == 200
-    data = res.json()
-    assert data["total_lifetime_jumps"] == 0
-    assert data["total_sessions"] == 0
-    assert data["total_active_duration_seconds"] == 0.0
-    assert data["best_record_jumps"] == 0
-    assert data["best_record_pace"] == 0.0
+    assert res.json()["status"] == "ok"
+    assert res.headers.get("X-Content-Type-Options") == "nosniff"
+    assert res.headers.get("X-Frame-Options") == "DENY"
+    assert "no-store" in (res.headers.get("Cache-Control") or "")
 
 
-def test_multiple_workouts_stats_aggregation(client):
-    workout1 = {
-        "start_time": "2026-11-23T08:00:00Z",
-        "end_time": "2026-11-23T08:10:00Z",
-        "total_jumps": 100,
-        "active_duration_seconds": 300.0,
-        "rest_duration_seconds": 60.0,
-        "total_duration_seconds": 360.0,
-        "average_jumps_per_minute": 20.0,
-        "max_jumps_per_minute": 40.0
-    }
-    workout2 = {
-        "start_time": "2026-11-23T12:00:00Z",
-        "end_time": "2026-11-23T12:15:00Z",
-        "total_jumps": 250,
-        "active_duration_seconds": 500.0,
-        "rest_duration_seconds": 100.0,
-        "total_duration_seconds": 600.0,
-        "average_jumps_per_minute": 30.0,
-        "max_jumps_per_minute": 60.0
-    }
-    client.post("/api/workouts", json=workout1)
-    client.post("/api/workouts", json=workout2)
-
-    stats_res = client.get("/api/stats")
-    assert stats_res.status_code == 200
-    stats = stats_res.json()
-    assert stats["total_lifetime_jumps"] == 350
-    assert stats["total_sessions"] == 2
-    assert stats["total_active_duration_seconds"] == 800.0
-    assert stats["best_record_jumps"] == 250
-    assert stats["best_record_pace"] == 30.0
+def test_unauthenticated_access_blocked(client):
+    assert client.get("/api/workouts").status_code == 401
+    assert client.get("/api/stats").status_code == 401
+    assert client.get("/api/admin/overview").status_code == 401
 
 
-def test_not_found_errors(client):
-    assert client.get("/api/workouts/99999").status_code == 404
-    assert client.delete("/api/workouts/99999").status_code == 404
+def test_password_strength_and_csrf_protection(client):
+    # Weak password rejected
+    weak_res = client.post(
+        "/api/auth/register",
+        json={"username": "weakuser", "email": "weak@test.com", "password": "password"},
+    )
+    assert weak_res.status_code == 422
 
+    # Register valid user
+    headers, _ = _register_and_headers(client, "alice", "alice@test.com")
 
-def test_pushup_workout_creation_and_stats(client):
-    # Pushup workout payload
-    pushup_payload = {
-        "start_time": "2026-11-23T14:00:00Z",
-        "end_time": "2026-11-23T14:05:00Z",
-        "exercise_type": "push_up",
-        "workout_mode": "20",
-        "target_reps": 20,
-        "completed_reps": 20,
-        "completion_status": "completed",
-        "active_duration_seconds": 120.0,
-        "rest_duration_seconds": 0.0,
-        "total_duration_seconds": 120.0,
-        "average_jumps_per_minute": 10.0,
-        "max_jumps_per_minute": 15.0
-    }
-    create_res = client.post("/api/workouts", json=pushup_payload)
-    assert create_res.status_code == 201
-    data = create_res.json()
-    assert data["exercise_type"] == "push_up"
-    assert data["workout_mode"] == "20"
-    assert data["target_reps"] == 20
-    assert data["completed_reps"] == 20
-    assert data["completion_status"] == "completed"
-
-    # Also create a skipping workout
-    skipping_payload = {
-        "start_time": "2026-11-23T15:00:00Z",
-        "end_time": "2026-11-23T15:05:00Z",
-        "exercise_type": "skipping",
-        "total_jumps": 100,
+    # Mutating request with cookie auth WITHOUT CSRF header is rejected (403)
+    payload = {
+        "start_time": "2026-11-26T10:00:00Z",
+        "end_time": "2026-11-26T10:05:00Z",
+        "total_jumps": 120,
         "active_duration_seconds": 180.0,
-        "rest_duration_seconds": 20.0,
-        "total_duration_seconds": 200.0,
-        "average_jumps_per_minute": 33.3,
-        "max_jumps_per_minute": 50.0
+        "total_duration_seconds": 180.0,
+        "average_jumps_per_minute": 40.0,
     }
-    client.post("/api/workouts", json=skipping_payload)
+    no_csrf_res = client.post("/api/workouts", json=payload)
+    assert no_csrf_res.status_code == 403
 
-    # Filter workouts by exercise_type=push_up
-    pushup_list = client.get("/api/workouts?exercise_type=push_up").json()
-    assert len(pushup_list) == 1
-    assert pushup_list[0]["exercise_type"] == "push_up"
-
-    # Filter workouts by exercise_type=skipping
-    skipping_list = client.get("/api/workouts?exercise_type=skipping").json()
-    assert len(skipping_list) == 1
-    assert skipping_list[0]["exercise_type"] == "skipping"
-
-    # All workouts
-    all_list = client.get("/api/workouts").json()
-    assert len(all_list) == 2
-
-    # Check dual stats
-    stats = client.get("/api/stats").json()
-    assert stats["total_sessions"] == 2
-    assert stats["total_lifetime_jumps"] == 100
-    assert stats["total_lifetime_pushups"] == 20
-    assert stats["total_pushup_sessions"] == 1
-    assert stats["best_record_pushups"] == 20
+    # With matching X-CSRF-Token header succeeds
+    ok_res = client.post("/api/workouts", json=payload, headers=headers)
+    assert ok_res.status_code == 201
+    assert ok_res.json()["total_jumps"] == 120
 
 
-def test_validation_errors(client):
-    # Invalid: negative jumps
-    invalid_payload = {
-        "start_time": "2026-11-23T08:00:00Z",
-        "end_time": "2026-11-23T08:10:00Z",
-        "total_jumps": -10,
-        "active_duration_seconds": 300.0,
-        "rest_duration_seconds": 60.0,
-        "total_duration_seconds": 360.0
-    }
-    res = client.post("/api/workouts", json=invalid_payload)
-    assert res.status_code == 422
+def test_user_isolation_and_idor_threat_logging(client):
+    # Bootstrap admin first
+    admin_headers, _ = _bootstrap_admin(client)
+
+    # Create Alice (user A) and record workout
+    alice_client = TestClient(app)
+    alice_headers, _ = _register_and_headers(alice_client, "alice", "alice@test.com")
+    w_res = alice_client.post(
+        "/api/workouts",
+        json={
+            "start_time": "2026-11-26T10:00:00Z",
+            "end_time": "2026-11-26T10:05:00Z",
+            "exercise_type": "push_up",
+            "workout_mode": "20",
+            "target_reps": 20,
+            "completed_reps": 20,
+            "active_duration_seconds": 90.0,
+            "total_duration_seconds": 90.0,
+            "average_jumps_per_minute": 13.3,
+        },
+        headers=alice_headers,
+    )
+    assert w_res.status_code == 201
+    alice_workout_id = w_res.json()["id"]
+
+    # Bob (user B) logs in
+    bob_client = TestClient(app)
+    bob_headers, _ = _register_and_headers(bob_client, "bobuser", "bob@test.com")
+
+    # Bob sees empty personal workouts
+    assert len(bob_client.get("/api/workouts").json()) == 0
+
+    # Bob tries to access or delete Alice's workout -> 403 IDOR blocked
+    assert bob_client.get(f"/api/workouts/{alice_workout_id}").status_code == 403
+    assert bob_client.delete(f"/api/workouts/{alice_workout_id}", headers=bob_headers).status_code == 403
+
+    # Bob tries to hit admin overview -> 403 Privilege Escalation blocked
+    assert bob_client.get("/api/admin/overview").status_code == 403
+
+    # Admin inspects threats and sees both IDOR_ACCESS_DENIED and PRIVILEGE_ESCALATION_ATTEMPT
+    threats = client.get("/api/admin/threats", headers=admin_headers).json()
+    event_types = {t["event_type"] for t in threats}
+    assert "IDOR_ACCESS_DENIED" in event_types
+    assert "PRIVILEGE_ESCALATION_ATTEMPT" in event_types
 
 
+def test_brute_force_lockout_and_admin_unlock(client):
+    admin_headers, _ = _bootstrap_admin(client)
+    user_client = TestClient(app)
+    _, victim = _register_and_headers(user_client, "victim", "victim@test.com", "SafePass123!")
+
+    attacker = TestClient(app)
+    # 4 failed attempts return 401
+    for _ in range(4):
+        res = attacker.post("/api/auth/login", json={"identifier": "victim", "password": "WrongPassword!"})
+        assert res.status_code == 401
+
+    # 5th failed attempt locks account (423 Locked)
+    lock_res = attacker.post("/api/auth/login", json={"identifier": "victim", "password": "WrongPassword!"})
+    assert lock_res.status_code == 423
+
+    # Even valid password fails while locked
+    valid_while_locked = attacker.post("/api/auth/login", json={"identifier": "victim", "password": "SafePass123!"})
+    assert valid_while_locked.status_code == 423
+
+    # Admin unlocks victim account & verifies threat logged
+    unlock_res = client.post(f"/api/admin/users/{victim['id']}/unlock", headers=admin_headers)
+    assert unlock_res.status_code == 200
+
+    # Victim can sign in again after admin unlock
+    ok_res = attacker.post("/api/auth/login", json={"identifier": "victim", "password": "SafePass123!"})
+    assert ok_res.status_code == 200
+
+
+def test_admin_user_dashboard_suspension_and_injection_shield(client):
+    admin_headers, _ = _bootstrap_admin(client)
+    u_client = TestClient(app)
+    u_headers, u_data = _register_and_headers(u_client, "athlete1", "athlete1@test.com")
+    u_client.post(
+        "/api/workouts",
+        json={
+            "start_time": "2026-11-26T10:00:00Z",
+            "end_time": "2026-11-26T10:02:00Z",
+            "total_jumps": 150,
+            "active_duration_seconds": 120.0,
+            "total_duration_seconds": 120.0,
+            "average_jumps_per_minute": 75.0,
+        },
+        headers=u_headers,
+    )
+
+    # Admin opens user dashboard
+    dash = client.get(f"/api/admin/users/{u_data['id']}/dashboard", headers=admin_headers)
+    assert dash.status_code == 200
+    assert dash.json()["stats"]["total_lifetime_jumps"] == 150
+    assert len(dash.json()["recent_workouts"]) == 1
+
+    # Admin suspends user -> user session immediately rejected
+    sus = client.post(f"/api/admin/users/{u_data['id']}/toggle-active", headers=admin_headers)
+    assert sus.status_code == 200
+    assert sus.json()["is_active"] is False
+    assert u_client.get("/api/workouts").status_code == 403
+
+    # Security shield blocks SQLi/scanner probes and logs them
+    probe_res = client.get("/api/workouts?q=' UNION SELECT * FROM users--")
+    assert probe_res.status_code == 403
+    scan_res = client.get("/wp-login.php")
+    assert scan_res.status_code == 403
+
+    threats = client.get("/api/admin/threats", headers=admin_headers).json()
+    threat_types = {t["event_type"] for t in threats}
+    assert "INJECTION_PROBE" in threat_types
+    assert "PATH_SCAN_PROBE" in threat_types

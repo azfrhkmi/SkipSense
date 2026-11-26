@@ -18,9 +18,16 @@ coverage/
 # Server process state
 .server_pids
 
-# SQLite Database files (keep directory via .gitkeep)
+# Environment & Secrets
+.env
+.env.*
+!.env.example
+.vercel
+
+# SQLite Database files & runtime secrets (keep directory via .gitkeep)
 data/*.db
 data/*.db-journal
+data/.jwt_secret
 
 # OS files
 .DS_Store
