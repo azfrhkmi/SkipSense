@@ -7,8 +7,6 @@ import { ActivityRings } from '../components/ActivityRings';
 import { WeeklyActivityChart } from '../components/WeeklyActivityChart';
 import { DailyGoalModal } from '../components/DailyGoalModal';
 import { TrophyCaseModal, renderBadgeIcon } from '../components/TrophyCaseModal';
-import { AccountModal } from '../components/AccountModal';
-import { AuthUser } from '../types/auth';
 import {
   buildMotivationProfile,
   DailyGoals,
@@ -28,25 +26,15 @@ import {
   Trophy,
   SlidersHorizontal,
   Sparkles,
-  ShieldAlert,
-  User as UserIcon,
 } from 'lucide-react';
 
 interface HomePageProps {
-  currentUser: AuthUser;
-  onUserUpdated: (user: AuthUser) => void;
-  onLogout: () => void;
-  onOpenAdmin: () => void;
   onStartSkipping: () => void;
   onStartPushUp: (mode: PushUpMode) => void;
   onViewHistory: () => void;
 }
 
 export const HomePage: React.FC<HomePageProps> = ({
-  currentUser,
-  onUserUpdated,
-  onLogout,
-  onOpenAdmin,
   onStartSkipping,
   onStartPushUp,
   onViewHistory,
@@ -69,7 +57,6 @@ export const HomePage: React.FC<HomePageProps> = ({
   const [showPushUpModal, setShowPushUpModal] = useState(false);
   const [showGoalModal, setShowGoalModal] = useState(false);
   const [showTrophyModal, setShowTrophyModal] = useState(false);
-  const [showAccountModal, setShowAccountModal] = useState(false);
 
   useEffect(() => {
     async function loadData() {
@@ -186,29 +173,29 @@ export const HomePage: React.FC<HomePageProps> = ({
           </div>
         </div>
 
-        <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap', justifyContent: 'flex-end' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
           {/* Streak Pill */}
           <div
             title={profile.workedOutToday ? 'Streak active today!' : 'Work out today to extend streak'}
             style={{
               display: 'flex',
               alignItems: 'center',
-              gap: 4,
+              gap: 5,
               backgroundColor:
                 profile.currentStreak > 0 ? 'rgba(255, 159, 10, 0.14)' : '#181D22',
               border:
                 profile.currentStreak > 0
                   ? '1px solid rgba(255, 159, 10, 0.4)'
                   : '1px solid var(--border-subtle)',
-              padding: '7px 10px',
-              borderRadius: 11,
+              padding: '8px 11px',
+              borderRadius: 12,
               fontSize: 12,
               fontWeight: 800,
               color: profile.currentStreak > 0 ? '#FF9F0A' : '#929BA3',
             }}
           >
             <Flame
-              size={14}
+              size={15}
               fill={profile.currentStreak > 0 ? '#FF9F0A' : 'none'}
               color={profile.currentStreak > 0 ? '#FF9F0A' : '#929BA3'}
             />
@@ -217,64 +204,23 @@ export const HomePage: React.FC<HomePageProps> = ({
             </span>
           </div>
 
-          {currentUser.role === 'admin' && (
-            <button
-              onClick={onOpenAdmin}
-              style={{
-                display: 'flex',
-                alignItems: 'center',
-                gap: 5,
-                backgroundColor: 'rgba(168, 85, 247, 0.18)',
-                border: '1px solid rgba(168, 85, 247, 0.45)',
-                color: '#C084FC',
-                padding: '7px 10px',
-                borderRadius: 11,
-                fontSize: 12,
-                fontWeight: 800,
-              }}
-            >
-              <ShieldAlert size={14} />
-              <span>Admin</span>
-            </button>
-          )}
-
           <button
             onClick={onViewHistory}
             style={{
               display: 'flex',
               alignItems: 'center',
-              gap: 5,
+              gap: 6,
               backgroundColor: 'var(--bg-card)',
               color: 'var(--text-primary)',
-              padding: '7px 10px',
-              borderRadius: 11,
+              padding: '8px 12px',
+              borderRadius: 12,
               fontSize: 12,
               fontWeight: 700,
               border: '1px solid var(--border-subtle)',
             }}
           >
-            <History size={14} />
+            <History size={15} />
             <span>History</span>
-          </button>
-
-          <button
-            onClick={() => setShowAccountModal(true)}
-            style={{
-              display: 'flex',
-              alignItems: 'center',
-              gap: 5,
-              backgroundColor: 'var(--bg-card)',
-              color: '#39E66B',
-              padding: '7px 10px',
-              borderRadius: 11,
-              fontSize: 12,
-              fontWeight: 700,
-              border: '1px solid rgba(57, 230, 107, 0.25)',
-            }}
-            title={`Account: @${currentUser.username}`}
-          >
-            <UserIcon size={14} />
-            <span>@{currentUser.username}</span>
           </button>
         </div>
       </header>
@@ -958,18 +904,6 @@ export const HomePage: React.FC<HomePageProps> = ({
         <TrophyCaseModal
           profile={profile}
           onClose={() => setShowTrophyModal(false)}
-        />
-      )}
-
-      {showAccountModal && (
-        <AccountModal
-          user={currentUser}
-          onClose={() => setShowAccountModal(false)}
-          onUserUpdated={onUserUpdated}
-          onLogout={() => {
-            setShowAccountModal(false);
-            onLogout();
-          }}
         />
       )}
     </div>

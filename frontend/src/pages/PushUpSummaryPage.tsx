@@ -353,7 +353,7 @@ export const PushUpSummaryPage: React.FC<PushUpSummaryPageProps> = ({
         <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
           <CheckCircle2 size={16} color={isSaved ? '#39E66B' : '#8E9AA8'} />
           <span style={{ fontSize: 13, color: isSaved ? '#39E66B' : '#8E9AA8', fontWeight: 600 }}>
-            {isSaved ? 'Session saved to SQLite database' : 'Saving session...'}
+            {isSaved ? 'Saved to this device (safe across refreshes)' : 'Saving session...'}
           </span>
         </div>
         <span style={{ fontSize: 12, fontWeight: 800, color: '#FF9F0A' }}>

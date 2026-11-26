@@ -18,5 +18,11 @@
         { "key": "Content-Type", "value": "application/wasm" }
       ]
     }
+  ],
+  "rewrites": [
+    {
+      "source": "/((?!assets/|wasm/|models/|favicon\\.svg).*)",
+      "destination": "/index.html"
+    }
   ]
 }

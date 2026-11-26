@@ -1,0 +1,9 @@
+backend/
+data/
+certificates/
+scripts/
+.venv/
+start.bat
+stop.bat
+conftest.py
+.env.example

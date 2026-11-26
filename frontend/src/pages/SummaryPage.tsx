@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { WorkoutSessionData } from '../types/workout';
 import { WorkoutService } from '../workout/workoutService';
 import { ConfettiBurst } from '../components/ConfettiBurst';
@@ -41,18 +41,23 @@ export const SummaryPage: React.FC<SummaryPageProps> = ({
   const [highlights, setHighlights] = useState<SessionHighlight>(() =>
     evaluateSessionHighlights(session, [])
   );
+  const saveAttemptedRef = useRef(false);
 
   useEffect(() => {
-    async function loadHighlights() {
+    async function saveAndLoadHighlights() {
+      if (saveAttemptedRef.current) return;
+      saveAttemptedRef.current = true;
       try {
         const history = await WorkoutService.getWorkouts();
-        setPreviousWorkouts(history);
         setHighlights(evaluateSessionHighlights(session, history));
+        const saved = await WorkoutService.saveWorkout(session);
+        setPreviousWorkouts([saved, ...history]);
+        setIsSaved(true);
       } catch {
         setHighlights(evaluateSessionHighlights(session, []));
       }
     }
-    loadHighlights();
+    saveAndLoadHighlights();
   }, [session]);
 
   const profileAfterSession = buildMotivationProfile(
@@ -342,7 +347,7 @@ export const SummaryPage: React.FC<SummaryPageProps> = ({
             }}
           >
             <Save size={20} />
-            <span>{isSaving ? 'SAVING TO DATABASE...' : 'SAVE WORKOUT & CLAIM XP'}</span>
+            <span>{isSaving ? 'SAVING...' : 'SAVE WORKOUT & CLAIM XP'}</span>
           </button>
         ) : (
           <div
@@ -361,7 +366,7 @@ export const SummaryPage: React.FC<SummaryPageProps> = ({
             }}
           >
             <CheckCircle2 size={18} />
-            <span>Saved to SQLite Database</span>
+            <span>Saved to This Device (Safe Across Refreshes)</span>
           </div>
         )}
 
