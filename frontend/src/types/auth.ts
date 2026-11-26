@@ -74,3 +74,4 @@ export interface AdminUserDetail {
   recent_workouts: WorkoutSessionData[];
   recent_security_events: SecurityEvent[];
 }
+

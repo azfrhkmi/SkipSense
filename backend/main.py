@@ -1,13 +1,18 @@
+import mimetypes
 import os
 from contextlib import asynccontextmanager
+from pathlib import Path
 
-from fastapi import FastAPI, Request
+from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse
+from fastapi.responses import FileResponse, JSONResponse
+from fastapi.staticfiles import StaticFiles
 
-from .database import IS_VERCEL, get_db, init_db
+from .database import BASE_DIR, IS_VERCEL, get_db, init_db
 from .routers import admin, auth, stats, workouts
 from .security import detect_malicious_payload, get_client_ip, log_security_event
+
+mimetypes.add_type("application/wasm", ".wasm")
 
 
 @asynccontextmanager
@@ -114,3 +119,30 @@ app.include_router(admin.router)
 @app.get("/api/health")
 def health_check():
     return {"status": "ok", "app": "SkipSense v1.3"}
+
+
+# Mount built Vite frontend (used as fallback in Vercel FastAPI mode or unified local serving)
+_DIST_DIR = Path(BASE_DIR) / "frontend" / "dist"
+if _DIST_DIR.exists():
+    for _sub in ("assets", "wasm", "models"):
+        _sub_dir = _DIST_DIR / _sub
+        if _sub_dir.exists():
+            app.mount(f"/{_sub}", StaticFiles(directory=str(_sub_dir)), name=f"static_{_sub}")
+
+    @app.get("/{full_path:path}", include_in_schema=False)
+    def serve_spa(full_path: str):
+        if full_path == "api" or full_path.startswith("api/"):
+            raise HTTPException(status_code=404, detail="Not Found")
+
+        if full_path:
+            try:
+                candidate = (_DIST_DIR / full_path).resolve()
+                if candidate.is_relative_to(_DIST_DIR.resolve()) and candidate.is_file():
+                    return FileResponse(str(candidate))
+            except Exception:
+                pass
+
+        index_file = _DIST_DIR / "index.html"
+        if index_file.exists():
+            return FileResponse(str(index_file))
+        raise HTTPException(status_code=404, detail="Not Found")

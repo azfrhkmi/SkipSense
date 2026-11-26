@@ -1,3 +1,4 @@
+import os
 import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy import create_engine
@@ -67,6 +68,16 @@ def test_health_check_and_security_headers(client):
     assert res.headers.get("X-Content-Type-Options") == "nosniff"
     assert res.headers.get("X-Frame-Options") == "DENY"
     assert "no-store" in (res.headers.get("Cache-Control") or "")
+
+    # Verify unknown /api/* path still returns JSON 404 instead of SPA HTML
+    missing_api = client.get("/api/nonexistent-endpoint")
+    assert missing_api.status_code == 404
+
+    # Verify root serves HTML cleanly when frontend/dist exists
+    if os.path.exists("frontend/dist/index.html"):
+        root_res = client.get("/")
+        assert root_res.status_code == 200
+        assert "text/html" in (root_res.headers.get("Content-Type") or "")
 
 
 def test_unauthenticated_access_blocked(client):

@@ -605,3 +605,4 @@ export const AuthPage: React.FC<AuthPageProps> = ({ onAuthenticated }) => {
     </div>
   );
 };
+

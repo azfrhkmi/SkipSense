@@ -18,15 +18,5 @@
         { "key": "Content-Type", "value": "application/wasm" }
       ]
     }
-  ],
-  "rewrites": [
-    {
-      "source": "/api/(.*)",
-      "destination": "/api/index.py"
-    },
-    {
-      "source": "/(.*)",
-      "destination": "/index.html"
-    }
   ]
 }

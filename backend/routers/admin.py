@@ -379,3 +379,4 @@ def toggle_user_role(
         resolved=True,
     )
     return {"user_id": user.id, "role": user.role}
+

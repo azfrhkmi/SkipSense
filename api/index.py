@@ -11,3 +11,4 @@ from backend.main import app  # noqa: E402
 
 # Ensure schema & env-configured admin are initialized safely on cold starts
 init_db()
+
