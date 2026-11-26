@@ -202,7 +202,12 @@ def init_db():
 
 
 def get_db():
-    ensure_db_initialized()
+    if not ensure_db_initialized():
+        from fastapi import HTTPException
+        raise HTTPException(
+            status_code=503,
+            detail=f"Database unavailable ({_db_config_error or _db_init_error or 'connection error'}). Check DATABASE_URL in environment variables.",
+        )
     db = SessionLocal()
     try:
         yield db

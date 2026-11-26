@@ -43,8 +43,10 @@ export const AuthPage: React.FC<AuthPageProps> = ({ onAuthenticated }) => {
           setTab('BOOTSTRAP');
         }
       })
-      .catch(() => {
-        // Ignore if backend unreachable on first paint
+      .catch((err: any) => {
+        if (err?.status === 503 || (err?.message && err.message.includes('Database unavailable'))) {
+          setError(err.message);
+        }
       });
   }, []);
 

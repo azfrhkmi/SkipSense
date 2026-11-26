@@ -135,7 +135,7 @@ if _DIST_DIR.exists():
         if _sub_dir.exists():
             app.mount(f"/{_sub}", StaticFiles(directory=str(_sub_dir)), name=f"static_{_sub}")
 
-    @app.get("/{full_path:path}", include_in_schema=False)
+    @app.api_route("/{full_path:path}", methods=["GET", "HEAD"], include_in_schema=False)
     def serve_spa(full_path: str):
         if full_path == "api" or full_path.startswith("api/"):
             raise HTTPException(status_code=404, detail="Not Found")
