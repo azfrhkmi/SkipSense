@@ -1,4 +1,5 @@
 import React, { useState } from 'react';
+import { Analytics } from '@vercel/analytics/react';
 import { HomePage } from './pages/HomePage';
 import { WorkoutPage } from './pages/WorkoutPage';
 import { SummaryPage } from './pages/SummaryPage';
@@ -102,6 +103,7 @@ export const App: React.FC = () => {
       )}
 
       {currentScreen === 'HISTORY' && <HistoryPage onBack={handleGoHome} />}
+      <Analytics />
     </div>
   );
 };
